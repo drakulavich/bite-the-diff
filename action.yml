@@ -10,6 +10,9 @@ inputs:
       1000:comment
       3000:comment
       5000:fail
+  file-threshold:
+    description: Comment when the PR changes this many files after exclude; never fails the job; 0 turns it off
+    default: "50"
   exclude:
     description: Globs of paths left out of the count, one per line
     default: ""
@@ -24,6 +27,8 @@ outputs:
     description: Changed lines counted
   level:
     description: The action of the threshold reached, none, comment or fail
+  files:
+    description: Changed files counted
 runs:
   using: node24
   main: dist/index.mjs

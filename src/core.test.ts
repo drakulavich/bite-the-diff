@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { commentBody, countLines, decide, parseThresholds, underThresholdsBody } from "./core.ts";
+import { commentBody, countFiles, countLines, decide, parseFileThreshold, parseThresholds, underThresholdsBody, withFileThreshold } from "./core.ts";
 
 const defaults = parseThresholds("1000:comment\n3000:comment\n5000:fail\n");
 const label = "elefante";
@@ -15,6 +15,96 @@ describe("parseThresholds", () => {
   for (const bad of ["1000", "many:comment", "1000:warn", "-5:fail", "1000:comment:fail"]) {
     test(`rejects ${bad}`, () => {
       expect(() => parseThresholds(bad)).toThrow(`Bad threshold: ${bad}`);
+    });
+  }
+});
+
+describe("parseFileThreshold", () => {
+  test("reads a non-negative integer", () => {
+    expect(parseFileThreshold("50")).toBe(50);
+    expect(parseFileThreshold("0")).toBe(0);
+  });
+
+  for (const bad of ["-1", "1.5", "many", "50 files", "1e3", ""]) {
+    test(`rejects "${bad}"`, () => {
+      expect(() => parseFileThreshold(bad)).toThrow(`Bad file-threshold: ${bad}`);
+    });
+  }
+});
+
+describe("countFiles", () => {
+  const files = [
+    { filename: "src/a.ts", additions: 10, deletions: 5 },
+    { filename: "bun.lock", additions: 700, deletions: 20 },
+    { filename: "dist/index.mjs", additions: 300, deletions: 100 },
+    { filename: ".hidden/gen.ts", additions: 3, deletions: 0 },
+  ];
+
+  test("counts every file with no exclude", () => {
+    expect(countFiles(files, [])).toBe(4);
+  });
+
+  test("leaves out files an exclude glob matches, in a dot directory too", () => {
+    expect(countFiles(files, ["dist/**", "*.lock", "**/gen.ts"])).toBe(1);
+  });
+});
+
+describe("withFileThreshold", () => {
+  test("49 files leaves any decision as it was", () => {
+    expect(withFileThreshold(decide(40, defaults, false), 49, 50)).toEqual({
+      lines: 40,
+      level: "none",
+      threshold: null,
+      icon: "",
+      bypassed: false,
+      conclusion: "success",
+      checkName: "bite-the-diff 40 lines",
+      failsJob: false,
+      redFrom: null,
+    });
+  });
+
+  test("50 files with the lines under every threshold: a neutral yellow comment", () => {
+    expect(withFileThreshold(decide(40, defaults, false), 50, 50)).toEqual({
+      lines: 40,
+      level: "comment",
+      threshold: null,
+      icon: "🟡",
+      bypassed: false,
+      conclusion: "neutral",
+      checkName: "bite-the-diff 🟡 50 files",
+      failsJob: false,
+      redFrom: null,
+      filesOver: { files: 50, threshold: 50 },
+    });
+  });
+
+  test("0 turns it off at any count", () => {
+    expect(withFileThreshold(decide(40, defaults, false), 3001, 0)).toEqual(decide(40, defaults, false));
+  });
+
+  test("the bypass label does not touch a files-only decision", () => {
+    const decision = withFileThreshold(decide(40, defaults, true), 63, 50);
+    expect(decision.bypassed).toBe(false);
+    expect(decision.failsJob).toBe(false);
+    expect(decision.level).toBe("comment");
+  });
+
+  const combined = [
+    { lines: 1240, label: false, name: "bite-the-diff 🟡 1240 lines, 63 files", level: "comment", conclusion: "neutral", failsJob: false },
+    { lines: 3100, label: false, name: "bite-the-diff 🟠 3100 lines, 63 files", level: "comment", conclusion: "neutral", failsJob: false },
+    { lines: 5200, label: false, name: "bite-the-diff 🟠 5200 lines, 63 files", level: "comment", conclusion: "neutral", failsJob: false },
+    { lines: 5600, label: false, name: "bite-the-diff 🔴 5600 lines, 63 files", level: "fail", conclusion: "failure", failsJob: true },
+    { lines: 5600, label: true, name: "bite-the-diff 🟠 5600 lines, 63 files", level: "fail", conclusion: "neutral", failsJob: false },
+  ];
+  for (const row of combined) {
+    test(`${row.lines} lines, label ${row.label}: the lines decide, and the name gains the files`, () => {
+      const decision = withFileThreshold(decide(row.lines, defaults, row.label), 63, 50);
+      expect(decision.checkName).toBe(row.name);
+      expect(decision.level).toBe(row.level as "comment");
+      expect(decision.conclusion).toBe(row.conclusion as "neutral");
+      expect(decision.failsJob).toBe(row.failsJob);
+      expect(decision.filesOver).toEqual({ files: 63, threshold: 50 });
     });
   }
 });
@@ -211,6 +301,55 @@ describe("commentBody", () => {
     expect(text(200)).toContain("🔴 **200 lines.** Too much elephant: this check stays red (threshold: 100).");
     expect(text(600)).toContain("🟡 **600 lines.** That's a lot of elephant for one bite (threshold: 500).");
     expect(text(950)).toContain("🟠 **950 lines.** Bigger than one bite should be (threshold: 900).");
+  });
+});
+
+describe("commentBody with files", () => {
+  const FOOT =
+    "<details>\n<summary>🐘 Ways to cut it into bites</summary>\n\n- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`; rebase a child once its parent merges. For parts that depend on each other in sequence.\n- **By file group:** separate PRs for files that need different reviewers. For a change that cuts across areas.\n- **Horizontal:** shared code or stubs first, then what uses them. For layered code.\n- **Vertical:** smaller slices of the feature, each working end to end. For feature work.\n- **Refactoring apart:** refactoring in its own PR, before the behaviour change. For a PR that mixes the two.\n";
+  const LEAVE =
+    "For whole-file deletions, generated code and automated refactoring, where a reviewer only checks intent.\n</details>\n\n<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>\n";
+  const ways = `${FOOT}- **Leave it whole:** add the path to \`exclude\`. ${LEAVE}`;
+  const waysWithLabel = `${FOOT}- **Leave it whole:** add the path to \`exclude\` or add the label \`elefante\`. ${LEAVE}`;
+  const body = (lines: number, hasLabel: boolean, files: number, cappedFiles: number | null = null) =>
+    commentBody(withFileThreshold(decide(lines, defaults, hasLabel), files, 50), { bypassLabel: label, cappedFiles });
+
+  test("only files reached, with the label on the PR: the label is not mentioned", () => {
+    expect(body(40, true, 63)).toBe(`<!-- bite-the-diff -->\n🟡 **63 files.** A lot of elephant to chew at once (threshold: 50).\n\n${ways}`);
+  });
+
+  test("only files reached over the listing cap", () => {
+    expect(body(40, false, 3001, 3001)).toBe(
+      `<!-- bite-the-diff -->\n🟡 **3001 files.** A lot of elephant to chew at once (threshold: 50).\n\nThis PR has 3001 changed files and the API lists 3000, so the count is the PR total and \`exclude\` was not applied.\n\n${ways}`,
+    );
+  });
+
+  test("a soft line threshold reached too", () => {
+    expect(body(3100, false, 63)).toBe(
+      `<!-- bite-the-diff -->\n🟠 **3100 lines.** Bigger than one bite should be (threshold: 3000).\nAlso 63 files (threshold: 50).\n\n${ways}`,
+    );
+  });
+
+  test("inside the tolerance too", () => {
+    expect(body(5200, false, 63)).toBe(
+      `<!-- bite-the-diff -->\n🟠 **5200 lines.** Almost too much elephant: red from 5500 (threshold: 5000).\nAlso 63 files (threshold: 50).\n\n${ways}`,
+    );
+  });
+
+  test("a fail threshold too: the files line sits with the headline, before the label hint", () => {
+    expect(body(5600, false, 63)).toBe(
+      `<!-- bite-the-diff -->\n🔴 **5600 lines.** Too much elephant: this check stays red (threshold: 5000).\nAlso 63 files (threshold: 50).\n\nCan't be cut? Add the label \`elefante\`.\n\n${waysWithLabel}`,
+    );
+  });
+
+  test("a bypassed fail threshold too", () => {
+    expect(body(5600, true, 63)).toBe(
+      `<!-- bite-the-diff -->\n🐘 **5600 lines.** The \`elefante\` label let this one through whole.\nAlso 63 files (threshold: 50).\n\n${waysWithLabel}`,
+    );
+  });
+
+  test("files under the threshold: byte for byte the text without any file count", () => {
+    expect(body(3100, false, 49)).toBe(`<!-- bite-the-diff -->\n🟠 **3100 lines.** Bigger than one bite should be (threshold: 3000).\n\n${ways}`);
   });
 });
 

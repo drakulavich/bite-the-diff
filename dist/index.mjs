@@ -1759,6 +1759,14 @@ function included(files, exclude) {
   const excluded = exclude.length ? import_picomatch.default(exclude, { dot: true }) : () => false;
   return files.filter((file) => !excluded(file.filename));
 }
+function parseFileThreshold(text) {
+  if (!/^\d+$/.test(text))
+    throw new Error(`Bad file-threshold: ${text}`);
+  return Number(text);
+}
+function countFiles(files, exclude) {
+  return included(files, exclude).length;
+}
 function countLines(files, exclude) {
   return included(files, exclude).reduce((sum, file) => sum + file.additions + file.deletions, 0);
 }
@@ -1807,17 +1815,28 @@ function decide(lines, thresholds, hasBypassLabel) {
     redFrom: null
   };
 }
+function withFileThreshold(decision, files, fileThreshold) {
+  if (fileThreshold === 0 || files < fileThreshold)
+    return decision;
+  const filesOver = { files, threshold: fileThreshold };
+  if (decision.level === "none") {
+    return { ...decision, level: "comment", icon: "\uD83D\uDFE1", conclusion: "neutral", checkName: `${CHECK_PREFIX}\uD83D\uDFE1 ${files} files`, filesOver };
+  }
+  return { ...decision, checkName: `${decision.checkName}, ${files} files`, filesOver };
+}
 function commentBody(decision, { bypassLabel, cappedFiles }) {
-  const { lines, threshold, icon, level, bypassed, redFrom } = decision;
+  const { lines, threshold, icon, level, bypassed, redFrom, filesOver } = decision;
   const reachedFail = level === "fail";
   const count = `**${lines} lines.**`;
-  const headline = redFrom !== null ? `${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).` : bypassed ? `\uD83D\uDC18 ${count} The \`${bypassLabel}\` label let this one through whole.` : reachedFail ? `${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).` : icon === "\uD83D\uDFE1" ? `${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).` : `${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`;
+  const headline = filesOver && threshold === null ? `${icon} **${filesOver.files} files.** A lot of elephant to chew at once (threshold: ${filesOver.threshold}).` : redFrom !== null ? `${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).` : bypassed ? `\uD83D\uDC18 ${count} The \`${bypassLabel}\` label let this one through whole.` : reachedFail ? `${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).` : icon === "\uD83D\uDFE1" ? `${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).` : `${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`;
+  const alsoFiles = filesOver && threshold !== null ? [`Also ${filesOver.files} files (threshold: ${filesOver.threshold}).`] : [];
   const labelHint = reachedFail && !bypassed ? ["", `Can't be cut? Add the label \`${bypassLabel}\`.`] : [];
   const capped = cappedFiles === null ? [] : [`This PR has ${cappedFiles} changed files and the API lists ${MAX_LISTED_FILES}, so the count is the PR total and \`exclude\` was not applied.`, ""];
   const leaveWhole = reachedFail ? `add the path to \`exclude\` or add the label \`${bypassLabel}\`` : "add the path to `exclude`";
   return [
     MARKER,
     headline,
+    ...alsoFiles,
     ...labelHint,
     "",
     ...capped,
@@ -1883,6 +1902,7 @@ async function findFirst(all, wanted) {
       return item;
   return;
 }
+var size = ({ lines, filesOver }) => filesOver ? `${lines} lines, ${filesOver.files} files` : `${lines} lines`;
 async function updateComment(pr, decision, capped) {
   const existing = await findFirst(pages(`/issues/${pr.number}/comments`), (comment) => comment.body.includes(MARKER));
   const body = decision.level === "none" ? underThresholdsBody(decision.lines) : commentBody(decision, {
@@ -1900,20 +1920,23 @@ async function updateCheckRun(pr, decision) {
     name: decision.checkName,
     status: "completed",
     conclusion: decision.conclusion,
-    output: { title: `${decision.lines} lines`, summary: `Threshold reached: ${decision.threshold ?? "none"}.` }
+    output: {
+      title: size(decision),
+      summary: `Threshold reached: ${decision.threshold ?? "none"}.${decision.filesOver ? ` File threshold reached: ${decision.filesOver.threshold}.` : ""}`
+    }
   };
   if (existing)
     await api("PATCH", `/check-runs/${existing.id}`, fields);
   else if (decision.level !== "none")
     await api("POST", "/check-runs", { ...fields, head_sha: pr.head.sha });
 }
-async function warnOn403(what, lines, write) {
+async function warnOn403(what, changed, write) {
   try {
     await write();
   } catch (error) {
     if (!(error instanceof ApiError && error.status === 403))
       throw error;
-    console.log(`::warning::bite-the-diff could not write the ${what}: the token got a 403. This PR changes ${lines} lines.`);
+    console.log(`::warning::bite-the-diff could not write the ${what}: the token got a 403. This PR changes ${changed}.`);
   }
 }
 async function run() {
@@ -1922,18 +1945,22 @@ async function run() {
   if (!pr)
     throw new Error("bite-the-diff runs on pull_request events");
   const thresholds = parseThresholds(input("thresholds"));
+  const fileThreshold = parseFileThreshold(input("file-threshold"));
   const exclude = input("exclude").split(`
 `).map((glob) => glob.trim()).filter(Boolean);
   const capped = pr.changed_files > MAX_LISTED_FILES;
-  const lines = capped ? pr.additions + pr.deletions : countLines(await Array.fromAsync(pages(`/pulls/${pr.number}/files`)), exclude);
-  const decision = decide(lines, thresholds, pr.labels.some((label) => label.name === input("bypass-label")));
+  const listed = capped ? null : await Array.fromAsync(pages(`/pulls/${pr.number}/files`));
+  const lines = listed ? countLines(listed, exclude) : pr.additions + pr.deletions;
+  const files = listed ? countFiles(listed, exclude) : pr.changed_files;
+  const decision = withFileThreshold(decide(lines, thresholds, pr.labels.some((label) => label.name === input("bypass-label"))), files, fileThreshold);
   appendFileSync(process.env.GITHUB_OUTPUT, `lines=${lines}
 level=${decision.level}
+files=${files}
 `);
-  appendFileSync(process.env.GITHUB_STEP_SUMMARY, `bite-the-diff: ${lines} lines, level ${decision.level}.
+  appendFileSync(process.env.GITHUB_STEP_SUMMARY, `bite-the-diff: ${size(decision)}, level ${decision.level}.
 `);
-  await warnOn403("comment", lines, () => updateComment(pr, decision, capped));
-  await warnOn403("check run", lines, () => updateCheckRun(pr, decision));
+  await warnOn403("comment", size(decision), () => updateComment(pr, decision, capped));
+  await warnOn403("check run", size(decision), () => updateCheckRun(pr, decision));
   if (decision.failsJob) {
     console.log(`::error::This PR changes ${lines} lines, past the failing threshold of ${decision.threshold}.`);
     process.exitCode = 1;
