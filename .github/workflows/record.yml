@@ -1,58 +1,11 @@
 name: record
 on:
   pull_request:
+    types: [labeled, unlabeled]
 jobs:
-  write:
+  event:
     runs-on: ubuntu-latest
-    permissions: { contents: read, pull-requests: write, checks: write }
-    env:
-      TOKEN: ${{ github.token }}
-      PR: ${{ github.event.pull_request.number }}
-      SHA: ${{ github.event.pull_request.head.sha }}
     steps:
-      - run: |
-          set -u
-          mkdir out
-          cp "$GITHUB_EVENT_PATH" out/event.json
-          api() { # name method path [json]
-            curl -sS -D "out/$1.headers" -o "out/$1.json" -X "$2" -w "$1 %{http_code}\n" \
-              -H "authorization: Bearer $TOKEN" -H 'accept: application/vnd.github+json' \
-              -H 'x-github-api-version: 2022-11-28' ${4:+-d "$4"} "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY$3"
-          }
-          api files GET "/pulls/$PR/files?per_page=100&page=1"
-          api comments-empty GET "/issues/$PR/comments?per_page=100&page=1"
-          api comment-create POST "/issues/$PR/comments" '{"body":"<!-- bite-the-diff -->\ncreated"}'
-          id=$(jq .id out/comment-create.json)
-          api comment-update PATCH "/issues/comments/$id" '{"body":"<!-- bite-the-diff -->\nupdated"}'
-          api comments-one GET "/issues/$PR/comments?per_page=100&page=1"
-          api checks-before GET "/commits/$SHA/check-runs?per_page=100&page=1"
-          api check-create POST "/check-runs" "{\"name\":\"bite-the-diff 🟡 1240 lines\",\"head_sha\":\"$SHA\",\"status\":\"completed\",\"conclusion\":\"neutral\",\"output\":{\"title\":\"1240 lines\",\"summary\":\"s\"}}"
-          cid=$(jq .id out/check-create.json)
-          api check-update PATCH "/check-runs/$cid" '{"name":"bite-the-diff 🔴 5200 lines","status":"completed","conclusion":"failure","output":{"title":"5200 lines","summary":"s"}}'
-          api checks-after GET "/commits/$SHA/check-runs?per_page=100&page=1"
-          api check-back PATCH "/check-runs/$cid" '{"name":"bite-the-diff 🟠 5200 lines","status":"completed","conclusion":"neutral","output":{"title":"5200 lines","summary":"s"}}'
-          echo ---; gh pr checks "$PR" -R "$GITHUB_REPOSITORY" || echo "exit $?"
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - run: mkdir out && cp "$GITHUB_EVENT_PATH" out/event.json
       - uses: actions/upload-artifact@v7
-        with: { name: write, path: out/ }
-  read-only:
-    runs-on: ubuntu-latest
-    permissions: { contents: read, pull-requests: read, checks: read }
-    env:
-      TOKEN: ${{ github.token }}
-      PR: ${{ github.event.pull_request.number }}
-      SHA: ${{ github.event.pull_request.head.sha }}
-    steps:
-      - run: |
-          mkdir out
-          api() {
-            curl -sS -D "out/$1.headers" -o "out/$1.json" -X "$2" -w "$1 %{http_code}\n" \
-              -H "authorization: Bearer $TOKEN" -H 'accept: application/vnd.github+json' \
-              -H 'x-github-api-version: 2022-11-28' ${4:+-d "$4"} "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY$3"
-          }
-          api comment-403 POST "/issues/$PR/comments" '{"body":"x"}'
-          api check-403 POST "/check-runs" "{\"name\":\"x\",\"head_sha\":\"$SHA\",\"status\":\"completed\",\"conclusion\":\"neutral\"}"
-          api check-list-readonly GET "/commits/$SHA/check-runs?per_page=100&page=1"
-      - uses: actions/upload-artifact@v7
-        with: { name: read-only, path: out/ }
+        with: { name: 'event-${{ github.event.action }}', path: out/ }
