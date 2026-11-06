@@ -72,7 +72,6 @@ jobs:
       - run: test "${{ steps.red.outcome }}" = failure
       - run: .github/self-test-assert.sh "bite-the-diff 🔴 ${{ steps.red.outputs.lines }} lines" failure fail "so this check fails"
 
-      # The runner hands uses: steps its own copy of the event, so this one runs the bundle by hand.
       - id: bypassed
         run: |
           jq '.pull_request.labels += [{"name": "self-test-bypass"}]' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/event.json"

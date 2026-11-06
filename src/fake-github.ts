@@ -17,7 +17,6 @@ function page<T>(items: T[], url: URL): T[] {
   return items.slice((number - 1) * perPage, number * perPage);
 }
 
-// Answers in the shapes of real responses, overriding only the fields a test sets.
 export class FakeGitHub {
   files: FileSpec[] = [];
   comments: { id: number; body: string }[] = [];
@@ -81,7 +80,6 @@ export class FakeGitHub {
     return jsonResponse(404, { message: `fake has no route ${route}` });
   }
 
-  // Runs src/main.ts as the runner would: inputs and paths in the environment, the event in a file.
   async runAction(options: {
     prFields?: Record<string, unknown>;
     labels?: string[];

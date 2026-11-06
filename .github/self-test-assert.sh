@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# usage: self-test-assert.sh <check name> <conclusion> <gh pr checks bucket> <text in the comment>
 set -euo pipefail
 name="$1" conclusion="$2" bucket="$3" text="$4"
 
-# gh pr checks exits 8 while this job is still running.
 checks=$(gh pr checks "$PR") || true
 printf '%s\n' '--- gh pr checks' "$checks" '---'
 printf '%s\n' "$checks" | grep -F "$name"$'\t'"$bucket"$'\t'
