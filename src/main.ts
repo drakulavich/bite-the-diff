@@ -11,7 +11,7 @@ import {
   type PrFile,
   parseFileThreshold,
   parseThresholds,
-  underThresholdsBody,
+  plural,
   withFileThreshold,
 } from "./core.ts";
 
@@ -47,7 +47,7 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) throw new ApiError(res.status, `${method} ${path}`);
-  return (await res.json()) as T;
+  return (res.status === 204 ? undefined : await res.json()) as T;
 }
 
 async function* pages<T>(path: string, items: (page: T[] & { check_runs: T[] }) => T[] = (page) => page) {
@@ -63,19 +63,28 @@ async function findFirst<T>(all: AsyncIterable<T>, wanted: (item: T) => boolean)
   return undefined;
 }
 
-const size = ({ lines, filesOver }: Decision) => (filesOver ? `${lines} lines, ${filesOver.files} files` : `${lines} lines`);
+const size = ({ lines, filesOver }: Decision) => (filesOver ? `${plural(lines, "line")}, ${plural(filesOver.files, "file")}` : plural(lines, "line"));
+
+async function deleteComment(id: number) {
+  try {
+    await api("DELETE", `/issues/comments/${id}`);
+  } catch (error) {
+    if (!(error instanceof ApiError && error.status === 404)) throw error;
+  }
+}
 
 async function updateComment(pr: PullRequest, decision: Decision, capped: boolean) {
   const existing = await findFirst(pages<{ id: number; body: string }>(`/issues/${pr.number}/comments`), (comment) => comment.body.includes(MARKER));
-  const body =
-    decision.level === "none"
-      ? underThresholdsBody(decision.lines)
-      : commentBody(decision, {
-          bypassLabel: input("bypass-label"),
-          cappedFiles: capped ? pr.changed_files : null,
-        });
+  if (decision.level === "none") {
+    if (existing) await deleteComment(existing.id);
+    return;
+  }
+  const body = commentBody(decision, {
+    bypassLabel: input("bypass-label"),
+    cappedFiles: capped ? pr.changed_files : null,
+  });
   if (existing) await api("PATCH", `/issues/comments/${existing.id}`, { body });
-  else if (decision.level !== "none") await api("POST", `/issues/${pr.number}/comments`, { body });
+  else await api("POST", `/issues/${pr.number}/comments`, { body });
 }
 
 async function updateCheckRun(pr: PullRequest, decision: Decision) {
@@ -137,7 +146,7 @@ async function run() {
   await warnOn403("check run", size(decision), () => updateCheckRun(pr, decision));
 
   if (decision.failsJob) {
-    console.log(`::error::This PR changes ${lines} lines, past the failing threshold of ${decision.threshold}.`);
+    console.log(`::error::This PR changes ${plural(lines, "line")}, past the failing threshold of ${decision.threshold}.`);
     process.exitCode = 1;
   }
 }

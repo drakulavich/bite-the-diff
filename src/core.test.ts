@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { commentBody, countFiles, countLines, decide, parseFileThreshold, parseThresholds, underThresholdsBody, withFileThreshold } from "./core.ts";
+import { commentBody, countFiles, countLines, decide, parseFileThreshold, parseThresholds, withFileThreshold } from "./core.ts";
 
 const defaults = parseThresholds("1000:comment\n3000:comment\n5000:fail\n");
 const label = "elefante";
@@ -353,8 +353,31 @@ describe("commentBody with files", () => {
   });
 });
 
-test("underThresholdsBody keeps the marker and gives the new count", () => {
-  expect(underThresholdsBody(40)).toBe(
-    "<!-- bite-the-diff -->\n✅ **40 lines.** Bite-sized again.\n\n<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>\n",
-  );
+describe("one line, one file", () => {
+  const headline = (lines: number, thresholds: string, files = 1, fileThreshold = 0, hasLabel = false) =>
+    commentBody(withFileThreshold(decide(lines, parseThresholds(thresholds), hasLabel), files, fileThreshold), { bypassLabel: label, cappedFiles: null })
+      .split("\n")
+      .slice(1, 3);
+
+  test("the check name in each state", () => {
+    expect(decide(1, parseThresholds("2:comment"), false).checkName).toBe("bite-the-diff 1 line");
+    expect(decide(1, parseThresholds("1:fail"), false).checkName).toBe("bite-the-diff 🟠 1 line");
+    expect(decide(1, parseThresholds("1:comment"), false).checkName).toBe("bite-the-diff 🟡 1 line");
+    expect(withFileThreshold(decide(5, parseThresholds("9:comment"), false), 1, 1).checkName).toBe("bite-the-diff 🟡 1 file");
+    expect(withFileThreshold(decide(5, parseThresholds("5:comment"), false), 1, 1).checkName).toBe("bite-the-diff 🟡 5 lines, 1 file");
+  });
+
+  test("every headline with a line count", () => {
+    expect(headline(1, "1:fail")[0]).toBe("🟠 **1 line.** Almost too much elephant: red from 2 (threshold: 1).");
+    expect(headline(1, "0:fail")[0]).toBe("🔴 **1 line.** Too much elephant: this check stays red (threshold: 0).");
+    expect(headline(1, "0:fail", 1, 0, true)[0]).toBe("🐘 **1 line.** The `elefante` label let this one through whole.");
+    expect(headline(1, "1:comment")[0]).toBe("🟡 **1 line.** That's a lot of elephant for one bite (threshold: 1).");
+    expect(headline(1, "0:comment\n1:comment")[0]).toBe("🟠 **1 line.** Bigger than one bite should be (threshold: 1).");
+  });
+
+  test("the file headline and the Also line", () => {
+    expect(headline(5, "9:comment", 1, 1)[0]).toBe("🟡 **1 file.** A lot of elephant to chew at once (threshold: 1).");
+    expect(headline(5, "5:comment", 1, 1)[1]).toBe("Also 1 file (threshold: 1).");
+    expect(headline(5, "5:comment", 2, 1)[1]).toBe("Also 2 files (threshold: 1).");
+  });
 });

@@ -23,6 +23,10 @@ export type Decision = {
   filesOver?: FilesOver;
 };
 
+export function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
 export function parseThresholds(text: string): Threshold[] {
   return text
     .split("\n")
@@ -64,7 +68,7 @@ export function decide(lines: number, thresholds: Threshold[], hasBypassLabel: b
       icon: "",
       bypassed: false,
       conclusion: "success",
-      checkName: `${CHECK_PREFIX}${lines} lines`,
+      checkName: `${CHECK_PREFIX}${plural(lines, "line")}`,
       failsJob: false,
       redFrom: null,
     };
@@ -80,7 +84,7 @@ export function decide(lines: number, thresholds: Threshold[], hasBypassLabel: b
       icon: "🟠",
       bypassed: false,
       conclusion: "neutral",
-      checkName: `${CHECK_PREFIX}🟠 ${lines} lines`,
+      checkName: `${CHECK_PREFIX}🟠 ${plural(lines, "line")}`,
       failsJob: false,
       redFrom,
     };
@@ -98,7 +102,7 @@ export function decide(lines: number, thresholds: Threshold[], hasBypassLabel: b
     icon,
     bypassed,
     conclusion: failsJob ? "failure" : "neutral",
-    checkName: `${CHECK_PREFIX}${icon} ${lines} lines`,
+    checkName: `${CHECK_PREFIX}${icon} ${plural(lines, "line")}`,
     failsJob,
     redFrom: null,
   };
@@ -108,19 +112,19 @@ export function withFileThreshold(decision: Decision, files: number, fileThresho
   if (fileThreshold === 0 || files < fileThreshold) return decision;
   const filesOver = { files, threshold: fileThreshold };
   if (decision.level === "none") {
-    return { ...decision, level: "comment", icon: "🟡", conclusion: "neutral", checkName: `${CHECK_PREFIX}🟡 ${files} files`, filesOver };
+    return { ...decision, level: "comment", icon: "🟡", conclusion: "neutral", checkName: `${CHECK_PREFIX}🟡 ${plural(files, "file")}`, filesOver };
   }
-  return { ...decision, checkName: `${decision.checkName}, ${files} files`, filesOver };
+  return { ...decision, checkName: `${decision.checkName}, ${plural(files, "file")}`, filesOver };
 }
 
 export function commentBody(decision: Decision, { bypassLabel, cappedFiles }: { bypassLabel: string; cappedFiles: number | null }): string {
   const { lines, threshold, icon, level, bypassed, redFrom, filesOver } = decision;
   const reachedFail = level === "fail";
-  const count = `**${lines} lines.**`;
+  const count = `**${plural(lines, "line")}.**`;
 
   const headline =
     filesOver && threshold === null
-      ? `${icon} **${filesOver.files} files.** A lot of elephant to chew at once (threshold: ${filesOver.threshold}).`
+      ? `${icon} **${plural(filesOver.files, "file")}.** A lot of elephant to chew at once (threshold: ${filesOver.threshold}).`
       : redFrom !== null
         ? `${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).`
         : bypassed
@@ -131,7 +135,7 @@ export function commentBody(decision: Decision, { bypassLabel, cappedFiles }: { 
               ? `${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).`
               : `${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`;
 
-  const alsoFiles = filesOver && threshold !== null ? [`Also ${filesOver.files} files (threshold: ${filesOver.threshold}).`] : [];
+  const alsoFiles = filesOver && threshold !== null ? [`Also ${plural(filesOver.files, "file")} (threshold: ${filesOver.threshold}).`] : [];
 
   const labelHint = reachedFail && !bypassed ? ["", `Can't be cut? Add the label \`${bypassLabel}\`.`] : [];
 
@@ -163,8 +167,4 @@ export function commentBody(decision: Decision, { bypassLabel, cappedFiles }: { 
     FOOTER,
     "",
   ].join("\n");
-}
-
-export function underThresholdsBody(lines: number): string {
-  return `${MARKER}\n✅ **${lines} lines.** Bite-sized again.\n\n${FOOTER}\n`;
 }
