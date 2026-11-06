@@ -1746,6 +1746,9 @@ var MARKER = "<!-- bite-the-diff -->";
 var CHECK_PREFIX = "bite-the-diff ";
 var MAX_LISTED_FILES = 3000;
 var FOOTER = "<sub>\uD83D\uDC18 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>";
+function plural(count, word) {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
 function parseThresholds(text) {
   return text.split(`
 `).map((line) => line.trim()).filter(Boolean).map((line) => {
@@ -1780,7 +1783,7 @@ function decide(lines, thresholds, hasBypassLabel) {
       icon: "",
       bypassed: false,
       conclusion: "success",
-      checkName: `${CHECK_PREFIX}${lines} lines`,
+      checkName: `${CHECK_PREFIX}${plural(lines, "line")}`,
       failsJob: false,
       redFrom: null
     };
@@ -1794,7 +1797,7 @@ function decide(lines, thresholds, hasBypassLabel) {
       icon: "\uD83D\uDFE0",
       bypassed: false,
       conclusion: "neutral",
-      checkName: `${CHECK_PREFIX}\uD83D\uDFE0 ${lines} lines`,
+      checkName: `${CHECK_PREFIX}\uD83D\uDFE0 ${plural(lines, "line")}`,
       failsJob: false,
       redFrom
     };
@@ -1810,7 +1813,7 @@ function decide(lines, thresholds, hasBypassLabel) {
     icon,
     bypassed,
     conclusion: failsJob ? "failure" : "neutral",
-    checkName: `${CHECK_PREFIX}${icon} ${lines} lines`,
+    checkName: `${CHECK_PREFIX}${icon} ${plural(lines, "line")}`,
     failsJob,
     redFrom: null
   };
@@ -1820,16 +1823,16 @@ function withFileThreshold(decision, files, fileThreshold) {
     return decision;
   const filesOver = { files, threshold: fileThreshold };
   if (decision.level === "none") {
-    return { ...decision, level: "comment", icon: "\uD83D\uDFE1", conclusion: "neutral", checkName: `${CHECK_PREFIX}\uD83D\uDFE1 ${files} files`, filesOver };
+    return { ...decision, level: "comment", icon: "\uD83D\uDFE1", conclusion: "neutral", checkName: `${CHECK_PREFIX}\uD83D\uDFE1 ${plural(files, "file")}`, filesOver };
   }
-  return { ...decision, checkName: `${decision.checkName}, ${files} files`, filesOver };
+  return { ...decision, checkName: `${decision.checkName}, ${plural(files, "file")}`, filesOver };
 }
 function commentBody(decision, { bypassLabel, cappedFiles }) {
   const { lines, threshold, icon, level, bypassed, redFrom, filesOver } = decision;
   const reachedFail = level === "fail";
-  const count = `**${lines} lines.**`;
-  const headline = filesOver && threshold === null ? `${icon} **${filesOver.files} files.** A lot of elephant to chew at once (threshold: ${filesOver.threshold}).` : redFrom !== null ? `${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).` : bypassed ? `\uD83D\uDC18 ${count} The \`${bypassLabel}\` label let this one through whole.` : reachedFail ? `${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).` : icon === "\uD83D\uDFE1" ? `${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).` : `${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`;
-  const alsoFiles = filesOver && threshold !== null ? [`Also ${filesOver.files} files (threshold: ${filesOver.threshold}).`] : [];
+  const count = `**${plural(lines, "line")}.**`;
+  const headline = filesOver && threshold === null ? `${icon} **${plural(filesOver.files, "file")}.** A lot of elephant to chew at once (threshold: ${filesOver.threshold}).` : redFrom !== null ? `${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).` : bypassed ? `\uD83D\uDC18 ${count} The \`${bypassLabel}\` label let this one through whole.` : reachedFail ? `${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).` : icon === "\uD83D\uDFE1" ? `${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).` : `${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`;
+  const alsoFiles = filesOver && threshold !== null ? [`Also ${plural(filesOver.files, "file")} (threshold: ${filesOver.threshold}).`] : [];
   const labelHint = reachedFail && !bypassed ? ["", `Can't be cut? Add the label \`${bypassLabel}\`.`] : [];
   const capped = cappedFiles === null ? [] : [`This PR has ${cappedFiles} changed files and the API lists ${MAX_LISTED_FILES}, so the count is the PR total and \`exclude\` was not applied.`, ""];
   const leaveWhole = reachedFail ? `add the path to \`exclude\` or add the label \`${bypassLabel}\`` : "add the path to `exclude`";
@@ -1856,13 +1859,6 @@ function commentBody(decision, { bypassLabel, cappedFiles }) {
   ].join(`
 `);
 }
-function underThresholdsBody(lines) {
-  return `${MARKER}
-✅ **${lines} lines.** Bite-sized again.
-
-${FOOTER}
-`;
-}
 
 // src/main.ts
 class ApiError extends Error {
@@ -1886,7 +1882,7 @@ async function api(method, path, body) {
   });
   if (!res.ok)
     throw new ApiError(res.status, `${method} ${path}`);
-  return await res.json();
+  return res.status === 204 ? undefined : await res.json();
 }
 async function* pages(path, items = (page) => page) {
   for (let page = 1;; page++) {
@@ -1902,16 +1898,29 @@ async function findFirst(all, wanted) {
       return item;
   return;
 }
-var size = ({ lines, filesOver }) => filesOver ? `${lines} lines, ${filesOver.files} files` : `${lines} lines`;
+var size = ({ lines, filesOver }) => filesOver ? `${plural(lines, "line")}, ${plural(filesOver.files, "file")}` : plural(lines, "line");
+async function deleteComment(id) {
+  try {
+    await api("DELETE", `/issues/comments/${id}`);
+  } catch (error) {
+    if (!(error instanceof ApiError && error.status === 404))
+      throw error;
+  }
+}
 async function updateComment(pr, decision, capped) {
-  const existing = await findFirst(pages(`/issues/${pr.number}/comments`), (comment) => comment.body.includes(MARKER));
-  const body = decision.level === "none" ? underThresholdsBody(decision.lines) : commentBody(decision, {
+  const existing = await findFirst(pages(`/issues/${pr.number}/comments`), (comment) => comment.body.startsWith(MARKER));
+  if (decision.level === "none") {
+    if (existing)
+      await deleteComment(existing.id);
+    return;
+  }
+  const body = commentBody(decision, {
     bypassLabel: input("bypass-label"),
     cappedFiles: capped ? pr.changed_files : null
   });
   if (existing)
     await api("PATCH", `/issues/comments/${existing.id}`, { body });
-  else if (decision.level !== "none")
+  else
     await api("POST", `/issues/${pr.number}/comments`, { body });
 }
 async function updateCheckRun(pr, decision) {
@@ -1962,7 +1971,7 @@ files=${files}
   await warnOn403("comment", size(decision), () => updateComment(pr, decision, capped));
   await warnOn403("check run", size(decision), () => updateCheckRun(pr, decision));
   if (decision.failsJob) {
-    console.log(`::error::This PR changes ${lines} lines, past the failing threshold of ${decision.threshold}.`);
+    console.log(`::error::This PR changes ${plural(lines, "line")}, past the failing threshold of ${decision.threshold}.`);
     process.exitCode = 1;
   }
 }

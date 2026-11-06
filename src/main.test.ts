@@ -13,6 +13,7 @@ afterEach(() => github.stop());
 const sized = (lines: number) => [{ filename: "src/a.ts", additions: lines, deletions: 0 }];
 const posts = () => github.requests.filter((r) => r.startsWith("POST"));
 const patches = () => github.requests.filter((r) => r.startsWith("PATCH"));
+const deletes = () => github.requests.filter((r) => r.startsWith("DELETE"));
 
 describe("the count", () => {
   test("sums every file over several pages, deletions included, into the lines output", async () => {
@@ -180,16 +181,83 @@ describe("the outcomes table at each boundary, on a PR with nothing from this ac
 });
 
 describe("dropping under the thresholds", () => {
-  test("an existing comment says so, and an existing check run turns success", async () => {
+  test("the marker comment is deleted, another comment stays, and an existing check run turns success", async () => {
+    github.comments = [{ id: 7, body: "looks big" }];
     github.files = sized(5600);
     await github.runAction();
+    const { id } = github.comments[1]!;
     github.files = sized(40);
     const result = await github.runAction();
     expect(result.exitCode).toBe(0);
-    expect(github.comments.map((c) => c.body)).toEqual([
-      `${MARKER}\n✅ **40 lines.** Bite-sized again.\n\n<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>\n`,
-    ]);
+    expect(result.stdout).toBe("");
+    expect(deletes()).toEqual([`DELETE /issues/comments/${id}`]);
+    expect(github.comments).toEqual([{ id: 7, body: "looks big" }]);
+    expect(patches().filter((r) => r.includes("/issues/"))).toEqual([]);
     expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 40 lines", "success"]]);
+    expect(github.checkOutputs.at(-1)).toEqual({ title: "40 lines", summary: "Threshold reached: none." });
+  });
+
+  test("no marker comment: nothing is deleted or written", async () => {
+    github.comments = [{ id: 7, body: "looks big" }];
+    github.files = sized(40);
+    const result = await github.runAction();
+    expect(result.exitCode).toBe(0);
+    expect(github.requests).toEqual([
+      "GET /pulls/42/files?per_page=100&page=1",
+      "GET /issues/42/comments?per_page=100&page=1",
+      `GET /commits/${HEAD_SHA}/check-runs?per_page=100&page=1`,
+    ]);
+    expect(github.comments).toEqual([{ id: 7, body: "looks big" }]);
+  });
+
+  test("a comment someone else already removed: a 404 on the delete is done, with no warning", async () => {
+    github.comments = [{ id: 500, body: `${MARKER}\nold` }];
+    github.deletedElsewhere.add(500);
+    github.checkRuns = [{ id: 7, name: "bite-the-diff 🟡 1240 lines", conclusion: "neutral", head_sha: HEAD_SHA }];
+    github.files = sized(40);
+    const result = await github.runAction();
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(deletes()).toEqual(["DELETE /issues/comments/500"]);
+    expect(github.checkRuns).toEqual([{ id: 7, name: "bite-the-diff 40 lines", conclusion: "success", head_sha: HEAD_SHA }]);
+  });
+
+  test("a 403 on the delete warns, keeps the summary, and the check run still turns success", async () => {
+    github.comments = [{ id: 500, body: `${MARKER}\nold` }];
+    github.checkRuns = [{ id: 7, name: "bite-the-diff 🟡 1240 lines", conclusion: "neutral", head_sha: HEAD_SHA }];
+    github.forbid.add("comments");
+    github.files = sized(40);
+    const result = await github.runAction();
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("::warning::bite-the-diff could not write the comment: the token got a 403. This PR changes 40 lines.\n");
+    expect(result.summary).toBe("bite-the-diff: 40 lines, level none.\n");
+    expect(github.comments).toEqual([{ id: 500, body: `${MARKER}\nold` }]);
+    expect(github.checkRuns).toEqual([{ id: 7, name: "bite-the-diff 40 lines", conclusion: "success", head_sha: HEAD_SHA }]);
+  });
+
+  test("any other error on the delete fails the run with its status", async () => {
+    github.comments = [{ id: 500, body: `${MARKER}\nold` }];
+    github.failWith = { route: "DELETE /issues/comments", status: 500 };
+    github.files = sized(40);
+    const result = await github.runAction();
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("::error::GitHub API DELETE /issues/comments/500: 500\n");
+    expect(result.summary).toBe("bite-the-diff: 40 lines, level none.\n");
+  });
+
+  test("rising again after the delete creates a new comment", async () => {
+    github.files = sized(1240);
+    await github.runAction();
+    const first = github.comments[0]!.id;
+    github.files = sized(40);
+    await github.runAction();
+    expect(github.comments).toEqual([]);
+    github.files = sized(1300);
+    await github.runAction();
+    expect(posts().filter((r) => r === "POST /issues/42/comments")).toHaveLength(2);
+    expect(github.comments).toHaveLength(1);
+    expect(github.comments[0]!.id).not.toBe(first);
+    expect(github.comments[0]!.body).toContain("🟡 **1300 lines.** That's a lot of elephant for one bite (threshold: 1000).");
   });
 
   test("a check run with no comment still turns success, and no comment appears", async () => {
@@ -197,7 +265,90 @@ describe("dropping under the thresholds", () => {
     github.checkRuns = [{ id: 7, name: "bite-the-diff 🟡 1240 lines", conclusion: "neutral", head_sha: HEAD_SHA }];
     await github.runAction();
     expect(github.comments).toEqual([]);
+    expect(deletes()).toEqual([]);
     expect(github.checkRuns).toEqual([{ id: 7, name: "bite-the-diff 40 lines", conclusion: "success", head_sha: HEAD_SHA }]);
+  });
+});
+
+describe("one line, one file", () => {
+  const WAYS_START = "\n\n<details>";
+
+  test("under the thresholds: the summary and the check run say 1 line", async () => {
+    github.checkRuns = [{ id: 7, name: "bite-the-diff 🟡 1240 lines", conclusion: "neutral", head_sha: HEAD_SHA }];
+    github.files = sized(1);
+    const result = await github.runAction();
+    expect(result.summary).toBe("bite-the-diff: 1 line, level none.\n");
+    expect(github.checkRuns[0]!.name).toBe("bite-the-diff 1 line");
+    expect(github.checkOutputs).toEqual([{ title: "1 line", summary: "Threshold reached: none." }]);
+  });
+
+  test("both reached: the headline, the Also line, the check run and the summary", async () => {
+    github.files = sized(1);
+    const result = await github.runAction({ inputs: { thresholds: "1:comment", "file-threshold": "1" } });
+    expect(result.summary).toBe("bite-the-diff: 1 line, 1 file, level comment.\n");
+    expect(
+      github.comments[0]!.body.startsWith(
+        `${MARKER}\n🟡 **1 line.** That's a lot of elephant for one bite (threshold: 1).\nAlso 1 file (threshold: 1).${WAYS_START}`,
+      ),
+    ).toBe(true);
+    expect(github.checkRuns[0]!.name).toBe("bite-the-diff 🟡 1 line, 1 file");
+    expect(github.checkOutputs).toEqual([{ title: "1 line, 1 file", summary: "Threshold reached: 1. File threshold reached: 1." }]);
+  });
+
+  test("only the file threshold reached: the headline and the check run say 1 file", async () => {
+    github.files = sized(5);
+    const result = await github.runAction({ inputs: { "file-threshold": "1" } });
+    expect(result.summary).toBe("bite-the-diff: 5 lines, 1 file, level comment.\n");
+    expect(github.comments[0]!.body.startsWith(`${MARKER}\n🟡 **1 file.** A lot of elephant to chew at once (threshold: 1).${WAYS_START}`)).toBe(true);
+    expect(github.checkRuns[0]!.name).toBe("bite-the-diff 🟡 1 file");
+  });
+
+  test("2 lines and 2 files stay plural", async () => {
+    github.files = [
+      { filename: "src/a.ts", additions: 1, deletions: 0 },
+      { filename: "src/b.ts", additions: 1, deletions: 0 },
+    ];
+    const result = await github.runAction({ inputs: { thresholds: "2:comment", "file-threshold": "2" } });
+    expect(result.summary).toBe("bite-the-diff: 2 lines, 2 files, level comment.\n");
+    expect(
+      github.comments[0]!.body.startsWith(
+        `${MARKER}\n🟡 **2 lines.** That's a lot of elephant for one bite (threshold: 2).\nAlso 2 files (threshold: 2).${WAYS_START}`,
+      ),
+    ).toBe(true);
+    expect(github.checkRuns[0]!.name).toBe("bite-the-diff 🟡 2 lines, 2 files");
+  });
+
+  test("the warning and the error say 1 line", async () => {
+    github.forbid.add("comments");
+    github.forbid.add("check-runs");
+    github.files = sized(1);
+    const result = await github.runAction({ inputs: { thresholds: "0:fail" } });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("::warning::bite-the-diff could not write the comment: the token got a 403. This PR changes 1 line.");
+    expect(result.stdout).toContain("::error::This PR changes 1 line, past the failing threshold of 0.");
+  });
+});
+
+describe("a person's comment that contains the marker", () => {
+  const quoted = { id: 7, body: `Why does the action leave ${MARKER} in its text?` };
+
+  test("over a threshold: it stays untouched and a new comment is created", async () => {
+    github.comments = [quoted];
+    github.files = sized(1240);
+    await github.runAction();
+    expect(github.comments[0]).toEqual({ id: 7, body: `Why does the action leave ${MARKER} in its text?` });
+    expect(github.comments).toHaveLength(2);
+    expect(github.comments[1]!.body).toContain("🟡 **1240 lines.**");
+    expect(patches()).toEqual([]);
+    expect(posts()).toContain("POST /issues/42/comments");
+  });
+
+  test("under the thresholds: it is not deleted", async () => {
+    github.comments = [quoted];
+    github.files = sized(40);
+    await github.runAction();
+    expect(deletes()).toEqual([]);
+    expect(github.comments).toEqual([{ id: 7, body: `Why does the action leave ${MARKER} in its text?` }]);
   });
 });
 
@@ -492,16 +643,14 @@ describe("file-threshold", () => {
     expect(github.checkOutputs).toEqual([{ title: "1240 lines", summary: "Threshold reached: 1000." }]);
   });
 
-  test("below both: the comment says bite-sized with the lines, and the same check run turns success", async () => {
+  test("below both: the comment is deleted, and the same check run turns success", async () => {
     github.files = spread(63, 63);
     await github.runAction();
     const { id } = github.checkRuns[0]!;
     github.files = spread(4, 40);
     const result = await github.runAction();
     expect(result.output).toBe("lines=40\nlevel=none\nfiles=4\n");
-    expect(github.comments.map((c) => c.body)).toEqual([
-      `${MARKER}\n✅ **40 lines.** Bite-sized again.\n\n<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>\n`,
-    ]);
+    expect(github.comments).toEqual([]);
     expect(github.checkRuns).toEqual([{ id, name: "bite-the-diff 40 lines", conclusion: "success", head_sha: HEAD_SHA }]);
   });
 

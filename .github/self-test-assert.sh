@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-name="$1" conclusion="$2" bucket="$3" text="$4"
+name="$1" conclusion="$2" bucket="$3" text="${4-}"
 
 checks=$(gh pr checks "$PR") || true
 printf '%s\n' '--- gh pr checks' "$checks" '---'
@@ -14,5 +14,9 @@ test "$runs" = "$name=$conclusion"
 bodies=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100" \
   --jq '.[] | select(.body | contains("<!-- bite-the-diff -->")) | .id')
 printf 'marker comments: %s\n' "$bodies"
+if [ -z "$text" ]; then
+  test -z "$bodies"
+  exit 0
+fi
 test "$(printf '%s\n' "$bodies" | wc -l)" -eq 1
 gh api "repos/$GITHUB_REPOSITORY/issues/comments/$bodies" --jq .body | grep -F "$text"

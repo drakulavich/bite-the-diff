@@ -27,6 +27,7 @@ export class FakeGitHub {
   requests: string[] = [];
   authorizations: (string | null)[] = [];
   forbid = new Set<"comments" | "check-runs">();
+  deletedElsewhere = new Set<number>();
   failWith: { route: string; status: number } | null = null;
   private nextId = 1000;
   private server = Bun.serve({ port: 0, fetch: (req) => this.handle(req) });
@@ -40,10 +41,11 @@ export class FakeGitHub {
     const route = `${req.method} ${url.pathname.replace("/repos/owner/repo", "")}`;
     this.requests.push(`${route}${url.search}`);
     this.authorizations.push(req.headers.get("authorization"));
-    const body = (req.method === "GET" ? null : await req.json()) as WriteBody;
+    const body = (req.method === "GET" || req.method === "DELETE" ? null : await req.json()) as WriteBody;
 
     if (this.failWith && route.startsWith(this.failWith.route)) return jsonResponse(this.failWith.status, { message: "fake failure" });
-    if (route.includes("/comments") && req.method !== "GET" && this.forbid.has("comments")) return jsonResponse(403, recorded.commentForbidden);
+    if (route.includes("/comments") && req.method !== "GET" && this.forbid.has("comments"))
+      return jsonResponse(403, req.method === "DELETE" ? recorded.deleteForbidden : recorded.commentForbidden);
     if (route.includes("/check-runs") && req.method !== "GET" && this.forbid.has("check-runs")) return jsonResponse(403, recorded.checkForbidden);
 
     if (route === `GET /pulls/${PR_NUMBER}/files`) {
@@ -66,6 +68,13 @@ export class FakeGitHub {
       const comment = this.comments.find((c) => c.id === Number(commentMatch[1]))!;
       comment.body = body.body;
       return jsonResponse(200, { ...recorded.comments[0], ...comment });
+    }
+    const deleteMatch = /^DELETE \/issues\/comments\/(\d+)$/.exec(route);
+    if (deleteMatch) {
+      const id = Number(deleteMatch[1]);
+      if (this.deletedElsewhere.has(id)) return jsonResponse(404, recorded.deleteGone);
+      this.comments = this.comments.filter((c) => c.id !== id);
+      return new Response(null, { status: recorded.deleteComment.status });
     }
     if (route === `GET /commits/${HEAD_SHA}/check-runs`) {
       const runs = page(this.checkRuns, url).map((run) => ({ ...recorded.checkRun, ...run }));
