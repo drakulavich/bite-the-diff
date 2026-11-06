@@ -72,17 +72,13 @@ jobs:
       - run: test "${{ steps.red.outcome }}" = failure
       - run: .github/self-test-assert.sh "bite-the-diff 🔴 ${{ steps.red.outputs.lines }} lines" failure fail "so this check fails"
 
-      - name: Put the bypass label on the event, as a labeled event carries it
-        run: |
-          jq '.pull_request.labels += [{"name": "self-test-bypass"}]' "$GITHUB_EVENT_PATH" > event.json
-          cp event.json "$GITHUB_EVENT_PATH"
+      # The runner hands uses: steps its own copy of the event, so this one runs the bundle by hand.
       - id: bypassed
-        uses: ./
-        with:
-          exclude: dist/**
-          thresholds: 1:fail
-          bypass-label: self-test-bypass
-      - run: test "${{ steps.bypassed.outcome }}" = success && test "${{ steps.bypassed.outputs.level }}" = fail
+        run: |
+          jq '.pull_request.labels += [{"name": "self-test-bypass"}]' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/event.json"
+          env GITHUB_EVENT_PATH="$RUNNER_TEMP/event.json" INPUT_THRESHOLDS=1:fail INPUT_EXCLUDE='dist/**' \
+            INPUT_BYPASS-LABEL=self-test-bypass INPUT_TOKEN="$GH_TOKEN" node dist/index.mjs
+      - run: test "${{ steps.bypassed.outputs.level }}" = fail
       - run: .github/self-test-assert.sh "bite-the-diff 🟠 ${{ steps.bypassed.outputs.lines }} lines" neutral skipping "let it pass"
 
       - id: under
