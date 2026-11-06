@@ -33,9 +33,13 @@ export function parseThresholds(text: string): Threshold[] {
     });
 }
 
-export function countLines(files: PrFile[], exclude: string[]): number {
+function included(files: PrFile[], exclude: string[]): PrFile[] {
   const excluded = exclude.length ? picomatch(exclude, { dot: true }) : () => false;
-  return files.filter((file) => !excluded(file.filename)).reduce((sum, file) => sum + file.additions + file.deletions, 0);
+  return files.filter((file) => !excluded(file.filename));
+}
+
+export function countLines(files: PrFile[], exclude: string[]): number {
+  return included(files, exclude).reduce((sum, file) => sum + file.additions + file.deletions, 0);
 }
 
 export function decide(lines: number, thresholds: Threshold[], hasBypassLabel: boolean): Decision {
@@ -96,14 +100,16 @@ export function commentBody(decision: Decision, { bypassLabel, cappedFiles }: { 
 
   const headline =
     redFrom !== null
-      ? [`${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).`]
+      ? `${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).`
       : bypassed
-        ? [`🐘 ${count} The \`${bypassLabel}\` label let this one through whole.`]
+        ? `🐘 ${count} The \`${bypassLabel}\` label let this one through whole.`
         : reachedFail
-          ? [`${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).`, "", `Can't be cut? Add the label \`${bypassLabel}\`.`]
+          ? `${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).`
           : icon === "🟡"
-            ? [`${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).`]
-            : [`${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`];
+            ? `${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).`
+            : `${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`;
+
+  const labelHint = reachedFail && !bypassed ? ["", `Can't be cut? Add the label \`${bypassLabel}\`.`] : [];
 
   const capped =
     cappedFiles === null
@@ -114,7 +120,8 @@ export function commentBody(decision: Decision, { bypassLabel, cappedFiles }: { 
 
   return [
     MARKER,
-    ...headline,
+    headline,
+    ...labelHint,
     "",
     ...capped,
     "<details>",

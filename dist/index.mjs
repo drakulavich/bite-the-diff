@@ -1755,9 +1755,12 @@ function parseThresholds(text) {
     return { lines: Number(match[1]), action: match[2] };
   });
 }
-function countLines(files, exclude) {
+function included(files, exclude) {
   const excluded = exclude.length ? import_picomatch.default(exclude, { dot: true }) : () => false;
-  return files.filter((file) => !excluded(file.filename)).reduce((sum, file) => sum + file.additions + file.deletions, 0);
+  return files.filter((file) => !excluded(file.filename));
+}
+function countLines(files, exclude) {
+  return included(files, exclude).reduce((sum, file) => sum + file.additions + file.deletions, 0);
 }
 function decide(lines, thresholds, hasBypassLabel) {
   const reached = thresholds.filter((t) => lines >= t.lines).reduce((high, t) => !high || t.lines > high.lines ? t : high, null);
@@ -1808,12 +1811,14 @@ function commentBody(decision, { bypassLabel, cappedFiles }) {
   const { lines, threshold, icon, level, bypassed, redFrom } = decision;
   const reachedFail = level === "fail";
   const count = `**${lines} lines.**`;
-  const headline = redFrom !== null ? [`${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).`] : bypassed ? [`\uD83D\uDC18 ${count} The \`${bypassLabel}\` label let this one through whole.`] : reachedFail ? [`${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).`, "", `Can't be cut? Add the label \`${bypassLabel}\`.`] : icon === "\uD83D\uDFE1" ? [`${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).`] : [`${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`];
+  const headline = redFrom !== null ? `${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).` : bypassed ? `\uD83D\uDC18 ${count} The \`${bypassLabel}\` label let this one through whole.` : reachedFail ? `${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).` : icon === "\uD83D\uDFE1" ? `${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).` : `${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`;
+  const labelHint = reachedFail && !bypassed ? ["", `Can't be cut? Add the label \`${bypassLabel}\`.`] : [];
   const capped = cappedFiles === null ? [] : [`This PR has ${cappedFiles} changed files and the API lists ${MAX_LISTED_FILES}, so the count is the PR total and \`exclude\` was not applied.`, ""];
   const leaveWhole = reachedFail ? `add the path to \`exclude\` or add the label \`${bypassLabel}\`` : "add the path to `exclude`";
   return [
     MARKER,
-    ...headline,
+    headline,
+    ...labelHint,
     "",
     ...capped,
     "<details>",
