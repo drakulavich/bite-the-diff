@@ -12,7 +12,7 @@ inputs:
       5000:fail
   exclude:
     description: Globs of paths left out of the count, one per line
-    default: ''
+    default: ""
   bypass-label:
     description: A failed threshold passes when the PR has this label
     default: bite-the-diff/skip
