@@ -1745,6 +1745,7 @@ var import_picomatch = __toESM(require_picomatch2(), 1);
 var MARKER = "<!-- bite-the-diff -->";
 var CHECK_PREFIX = "bite-the-diff ";
 var MAX_LISTED_FILES = 3000;
+var FOOTER = "<sub>\uD83D\uDC18 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>";
 function parseThresholds(text) {
   return text.split(`
 `).map((line) => line.trim()).filter(Boolean).map((line) => {
@@ -1809,6 +1810,8 @@ function commentBody(decision, { bypassLabel, cappedFiles }) {
     "- **Refactoring apart:** refactoring in its own PR, before the behaviour change. For a PR that mixes the two.",
     `- **Leave it whole:** ${leaveWhole}. For whole-file deletions, generated code and automated refactoring, where a reviewer only checks intent.`,
     "</details>",
+    "",
+    FOOTER,
     ""
   ].join(`
 `);
@@ -1816,6 +1819,8 @@ function commentBody(decision, { bypassLabel, cappedFiles }) {
 function underThresholdsBody(lines) {
   return `${MARKER}
 ✅ **${lines} lines.** Bite-sized again.
+
+${FOOTER}
 `;
 }
 

@@ -150,7 +150,9 @@ describe("dropping under the thresholds", () => {
     github.files = sized(40);
     const result = await github.runAction();
     expect(result.exitCode).toBe(0);
-    expect(github.comments.map((c) => c.body)).toEqual([`${MARKER}\n✅ **40 lines.** Bite-sized again.\n`]);
+    expect(github.comments.map((c) => c.body)).toEqual([
+      `${MARKER}\n✅ **40 lines.** Bite-sized again.\n\n<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>\n`,
+    ]);
     expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 40 lines", "success"]]);
   });
 

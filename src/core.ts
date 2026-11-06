@@ -3,6 +3,7 @@ import picomatch from "picomatch";
 export const MARKER = "<!-- bite-the-diff -->";
 export const CHECK_PREFIX = "bite-the-diff ";
 export const MAX_LISTED_FILES = 3000;
+const FOOTER = "<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>";
 
 export type PrFile = { filename: string; additions: number; deletions: number };
 type Action = "comment" | "fail";
@@ -105,9 +106,11 @@ export function commentBody(decision: Decision, { bypassLabel, cappedFiles }: { 
     `- **Leave it whole:** ${leaveWhole}. For whole-file deletions, generated code and automated refactoring, where a reviewer only checks intent.`,
     "</details>",
     "",
+    FOOTER,
+    "",
   ].join("\n");
 }
 
 export function underThresholdsBody(lines: number): string {
-  return `${MARKER}\n✅ **${lines} lines.** Bite-sized again.\n`;
+  return `${MARKER}\n✅ **${lines} lines.** Bite-sized again.\n\n${FOOTER}\n`;
 }

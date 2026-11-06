@@ -127,6 +127,8 @@ describe("commentBody", () => {
       `- **Leave it whole:** ${leaveWhole}. For whole-file deletions, generated code and automated refactoring, where a reviewer only checks intent.`,
       "</details>",
       "",
+      "<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>",
+      "",
     ].join("\n");
   const excludeOnly = "add the path to `exclude`";
   const excludeOrLabel = "add the path to `exclude` or add the label `elefante`";
@@ -169,5 +171,7 @@ describe("commentBody", () => {
 });
 
 test("underThresholdsBody keeps the marker and gives the new count", () => {
-  expect(underThresholdsBody(40)).toBe("<!-- bite-the-diff -->\n✅ **40 lines.** Bite-sized again.\n");
+  expect(underThresholdsBody(40)).toBe(
+    "<!-- bite-the-diff -->\n✅ **40 lines.** Bite-sized again.\n\n<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>\n",
+  );
 });
