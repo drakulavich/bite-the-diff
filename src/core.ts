@@ -55,7 +55,7 @@ export function decide(lines: number, thresholds: Threshold[], hasBypassLabel: b
     };
   }
 
-  // Integer arithmetic: 5000 * 1.1 is 5500.000000000001, which rounds up to 5501.
+  // Integer arithmetic: 3000 * 1.1 is 3300.0000000000005, which rounds up to 3301.
   const redFrom = Math.ceil((reached.lines * 11) / 10);
   if (reached.action === "fail" && lines < redFrom) {
     return {

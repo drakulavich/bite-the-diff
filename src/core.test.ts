@@ -124,6 +124,13 @@ describe("decide with custom thresholds", () => {
     expect(decide(1358, custom, false).failsJob).toBe(true);
   });
 
+  test("the tolerance has no floating-point error, where times 1.1 would give 3301", () => {
+    const custom = parseThresholds("3000:fail");
+    expect(decide(3299, custom, false).redFrom).toBe(3300);
+    expect(decide(3300, custom, false).level).toBe("fail");
+    expect(decide(3300, custom, false).failsJob).toBe(true);
+  });
+
   test("the highest threshold reached applies while it sits in its tolerance", () => {
     const decision = decide(1120, parseThresholds("1000:fail\n1050:fail"), false);
     expect(decision.level).toBe("comment");
