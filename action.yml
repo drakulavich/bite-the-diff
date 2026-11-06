@@ -1,0 +1,29 @@
+name: bite-the-diff
+description: Flags a PR with a large diff and says how to split it
+branding:
+  icon: scissors
+  color: orange
+inputs:
+  thresholds:
+    description: Lines and action per threshold, as lines:comment or lines:fail, one per line
+    default: |
+      1000:comment
+      3000:comment
+      5000:fail
+  exclude:
+    description: Globs of paths left out of the count, one per line
+    default: ""
+  bypass-label:
+    description: A failed threshold passes when the PR has this label
+    default: bite-the-diff/skip
+  token:
+    description: Needs pull-requests write and checks write
+    default: ${{ github.token }}
+outputs:
+  lines:
+    description: Changed lines counted
+  level:
+    description: The action of the threshold reached, none, comment or fail
+runs:
+  using: node24
+  main: dist/index.mjs

@@ -1,0 +1,26 @@
+{
+  "name": "bite-the-diff",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "Anton Yakutovich (https://github.com/drakulavich)",
+  "scripts": {
+    "build": "bun build src/main.ts --target=node --format=esm --outfile=dist/index.mjs",
+    "typecheck": "bun check --no-script && bun check --no-script -p tsconfig.test.json",
+    "lint": "bun fmt --check && biome ci && knip --include files,exports,types",
+    "fmt": "bun fmt",
+    "test": "bun test --randomize",
+    "check": "bun run typecheck && bun run lint && bun run test"
+  },
+  "dependencies": {
+    "picomatch": "4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.3",
+    "@types/bun": "^1.4.4",
+    "@types/node": "24",
+    "@types/picomatch": "^4.0.3",
+    "knip": "^6.38.0"
+  }
+}
