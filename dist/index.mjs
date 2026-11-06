@@ -1843,7 +1843,7 @@ function commentBody(decision, { bypassLabel, cappedFiles }) {
     "<details>",
     "<summary>\uD83D\uDC18 Ways to cut it into bites</summary>",
     "",
-    "- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`; rebase a child once its parent merges. For parts that depend on each other in sequence.",
+    "- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`. When the parent merges, retarget and rebase the child before deleting the parent's branch: deleting it first closes the child. For parts that depend on each other in sequence.",
     "- **By file group:** separate PRs for files that need different reviewers. For a change that cuts across areas.",
     "- **Horizontal:** shared code or stubs first, then what uses them. For layered code.",
     "- **Vertical:** smaller slices of the feature, each working end to end. For feature work.",
