@@ -245,7 +245,7 @@ describe("commentBody", () => {
       "<details>",
       "<summary>🐘 Ways to cut it into bites</summary>",
       "",
-      "- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`; rebase a child once its parent merges. For parts that depend on each other in sequence.",
+      "- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`. When the parent merges, retarget and rebase the child before deleting the parent's branch: deleting it first closes the child. For parts that depend on each other in sequence.",
       "- **By file group:** separate PRs for files that need different reviewers. For a change that cuts across areas.",
       "- **Horizontal:** shared code or stubs first, then what uses them. For layered code.",
       "- **Vertical:** smaller slices of the feature, each working end to end. For feature work.",
@@ -306,7 +306,7 @@ describe("commentBody", () => {
 
 describe("commentBody with files", () => {
   const FOOT =
-    "<details>\n<summary>🐘 Ways to cut it into bites</summary>\n\n- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`; rebase a child once its parent merges. For parts that depend on each other in sequence.\n- **By file group:** separate PRs for files that need different reviewers. For a change that cuts across areas.\n- **Horizontal:** shared code or stubs first, then what uses them. For layered code.\n- **Vertical:** smaller slices of the feature, each working end to end. For feature work.\n- **Refactoring apart:** refactoring in its own PR, before the behaviour change. For a PR that mixes the two.\n";
+    "<details>\n<summary>🐘 Ways to cut it into bites</summary>\n\n- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`. When the parent merges, retarget and rebase the child before deleting the parent's branch: deleting it first closes the child. For parts that depend on each other in sequence.\n- **By file group:** separate PRs for files that need different reviewers. For a change that cuts across areas.\n- **Horizontal:** shared code or stubs first, then what uses them. For layered code.\n- **Vertical:** smaller slices of the feature, each working end to end. For feature work.\n- **Refactoring apart:** refactoring in its own PR, before the behaviour change. For a PR that mixes the two.\n";
   const LEAVE =
     "For whole-file deletions, generated code and automated refactoring, where a reviewer only checks intent.\n</details>\n\n<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>\n";
   const ways = `${FOOT}- **Leave it whole:** add the path to \`exclude\`. ${LEAVE}`;
