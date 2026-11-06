@@ -34,11 +34,11 @@ describe("the count", () => {
 
   test("over 3000 files, the count is the event totals, without exclude, and the comment says so", async () => {
     const result = await github.runAction({
-      prFields: { changed_files: 3001, additions: 4000, deletions: 1200 },
+      prFields: { changed_files: 3001, additions: 4400, deletions: 1200 },
       inputs: { exclude: "**" },
       labels: [LABEL],
     });
-    expect(result.output).toBe("lines=5200\nlevel=fail\n");
+    expect(result.output).toBe("lines=5600\nlevel=fail\n");
     expect(github.requests.some((r) => r.includes("/files"))).toBe(false);
     expect(github.comments[0]!.body).toContain("This PR has 3001 changed files and the API lists 3000");
   });
@@ -56,36 +56,50 @@ describe("the outcomes table at each boundary, on a PR with nothing from this ac
     {
       lines: 1000,
       level: "comment",
-      comment: "🟡 This PR changes 1000 lines, past the threshold of 1000.",
+      comment: "🟡 **1000 lines.** That's a lot of elephant for one bite (threshold: 1000).",
       check: ["bite-the-diff 🟡 1000 lines", "neutral"],
       exitCode: 0,
     },
     {
       lines: 2999,
       level: "comment",
-      comment: "🟡 This PR changes 2999 lines, past the threshold of 1000.",
+      comment: "🟡 **2999 lines.** That's a lot of elephant for one bite (threshold: 1000).",
       check: ["bite-the-diff 🟡 2999 lines", "neutral"],
       exitCode: 0,
     },
     {
       lines: 3000,
       level: "comment",
-      comment: "🟠 This PR changes 3000 lines, past the threshold of 3000.",
+      comment: "🟠 **3000 lines.** Bigger than one bite should be (threshold: 3000).",
       check: ["bite-the-diff 🟠 3000 lines", "neutral"],
       exitCode: 0,
     },
     {
       lines: 4999,
       level: "comment",
-      comment: "🟠 This PR changes 4999 lines, past the threshold of 3000.",
+      comment: "🟠 **4999 lines.** Bigger than one bite should be (threshold: 3000).",
       check: ["bite-the-diff 🟠 4999 lines", "neutral"],
       exitCode: 0,
     },
     {
       lines: 5000,
+      level: "comment",
+      comment: "🟠 **5000 lines.** Almost too much elephant: red from 5500 (threshold: 5000).",
+      check: ["bite-the-diff 🟠 5000 lines", "neutral"],
+      exitCode: 0,
+    },
+    {
+      lines: 5499,
+      level: "comment",
+      comment: "🟠 **5499 lines.** Almost too much elephant: red from 5500 (threshold: 5000).",
+      check: ["bite-the-diff 🟠 5499 lines", "neutral"],
+      exitCode: 0,
+    },
+    {
+      lines: 5500,
       level: "fail",
-      comment: `🔴 This PR changes 5000 lines, past the failing threshold of 5000, so this check fails. To let it pass, add the label \`${LABEL}\`.`,
-      check: ["bite-the-diff 🔴 5000 lines", "failure"],
+      comment: `🔴 **5500 lines.** Too much elephant: this check stays red (threshold: 5000).\n\nCan't be cut? Add the label \`${LABEL}\`.`,
+      check: ["bite-the-diff 🔴 5500 lines", "failure"],
       exitCode: 1,
     },
   ];
@@ -108,31 +122,53 @@ describe("the outcomes table at each boundary, on a PR with nothing from this ac
   }
 
   test("a failure writes ::error with the count", async () => {
-    github.files = sized(5200);
+    github.files = sized(5600);
     const result = await github.runAction();
-    expect(result.stdout).toContain("::error::This PR changes 5200 lines, past the failing threshold of 5000.");
+    expect(result.stdout).toContain("::error::This PR changes 5600 lines, past the failing threshold of 5000.");
   });
 
-  test("5000 with the bypass label: comment says so, check is neutral orange, job green", async () => {
-    github.files = sized(5000);
+  test("5500 with the bypass label: comment says so, check is neutral orange, job green", async () => {
+    github.files = sized(5500);
     const result = await github.runAction({ labels: [LABEL] });
     expect(result.exitCode).toBe(0);
-    expect(result.output).toBe("lines=5000\nlevel=fail\n");
-    expect(github.comments[0]!.body).toContain(`The label \`${LABEL}\` let it pass.`);
-    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🟠 5000 lines", "neutral"]]);
+    expect(result.output).toBe("lines=5500\nlevel=fail\n");
+    expect(github.comments[0]!.body).toContain(`🐘 **5500 lines.** The \`${LABEL}\` label let this one through whole.`);
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🟠 5500 lines", "neutral"]]);
   });
 
   test("some other label does not bypass", async () => {
-    github.files = sized(5000);
+    github.files = sized(5500);
     const result = await github.runAction({ labels: ["docs"] });
     expect(result.exitCode).toBe(1);
   });
 
   test("the bypass-label input names the label", async () => {
-    github.files = sized(5000);
+    github.files = sized(5500);
     const result = await github.runAction({ labels: ["big-ok"], inputs: { "bypass-label": "big-ok" } });
     expect(result.exitCode).toBe(0);
-    expect(github.comments[0]!.body).toContain("The label `big-ok` let it pass.");
+    expect(github.comments[0]!.body).toContain("The `big-ok` label let this one through whole.");
+  });
+
+  test("inside the tolerance the bypass label has no effect and is not mentioned", async () => {
+    github.files = sized(5200);
+    const result = await github.runAction({ labels: [LABEL] });
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBe("lines=5200\nlevel=comment\n");
+    expect(github.comments[0]!.body).toContain("🟠 **5200 lines.** Almost too much elephant: red from 5500 (threshold: 5000).");
+    expect(github.comments[0]!.body).not.toContain(LABEL);
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🟠 5200 lines", "neutral"]]);
+  });
+
+  test("a custom fail threshold goes red only past its tolerance", async () => {
+    github.files = sized(1357);
+    const inside = await github.runAction({ inputs: { thresholds: "1234:fail" } });
+    expect(inside.exitCode).toBe(0);
+    expect(inside.output).toBe("lines=1357\nlevel=comment\n");
+    expect(github.comments[0]!.body).toContain("🟠 **1357 lines.** Almost too much elephant: red from 1358 (threshold: 1234).");
+    github.files = sized(1358);
+    const past = await github.runAction({ inputs: { thresholds: "1234:fail" } });
+    expect(past.exitCode).toBe(1);
+    expect(past.output).toContain("lines=1358\nlevel=fail\n");
   });
 
   test("the thresholds input applies", async () => {
@@ -145,12 +181,14 @@ describe("the outcomes table at each boundary, on a PR with nothing from this ac
 
 describe("dropping under the thresholds", () => {
   test("an existing comment says so, and an existing check run turns success", async () => {
-    github.files = sized(5200);
+    github.files = sized(5600);
     await github.runAction();
     github.files = sized(40);
     const result = await github.runAction();
     expect(result.exitCode).toBe(0);
-    expect(github.comments.map((c) => c.body)).toEqual([`${MARKER}\nThis PR now changes 40 lines, under the thresholds.\n`]);
+    expect(github.comments.map((c) => c.body)).toEqual([
+      `${MARKER}\n✅ **40 lines.** Bite-sized again.\n\n<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>\n`,
+    ]);
     expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 40 lines", "success"]]);
   });
 
@@ -170,7 +208,7 @@ describe("at most one comment", () => {
     github.files = sized(1240);
     await github.runAction();
     expect(github.comments).toHaveLength(131);
-    expect(github.comments.at(-1)!.body).toContain("This PR changes 1240 lines");
+    expect(github.comments.at(-1)!.body).toContain("🟡 **1240 lines.**");
     expect(github.comments[0]!.body).toBe("chat 0");
     expect(github.requests).toContain("GET /issues/42/comments?per_page=100&page=2");
     expect(posts()).toEqual(["POST /check-runs"]);
@@ -182,7 +220,7 @@ describe("at most one comment", () => {
     github.files = sized(3100);
     await github.runAction();
     expect(github.comments).toHaveLength(1);
-    expect(github.comments[0]!.body).toContain("🟠 This PR changes 3100 lines, past the threshold of 3000.");
+    expect(github.comments[0]!.body).toContain("🟠 **3100 lines.** Bigger than one bite should be (threshold: 3000).");
     expect(github.comments[0]!.body.startsWith(MARKER)).toBe(true);
   });
 });
@@ -200,13 +238,13 @@ describe("at most one check run per commit", () => {
   });
 
   test("removing the bypass label turns the same check run from neutral to failure", async () => {
-    github.files = sized(5200);
+    github.files = sized(5600);
     await github.runAction({ labels: [LABEL] });
     const { id, conclusion } = github.checkRuns[0]!;
     expect(conclusion).toBe("neutral");
     const result = await github.runAction({ labels: [] });
     expect(result.exitCode).toBe(1);
-    expect(github.checkRuns).toEqual([{ id, name: "bite-the-diff 🔴 5200 lines", conclusion: "failure", head_sha: HEAD_SHA }]);
+    expect(github.checkRuns).toEqual([{ id, name: "bite-the-diff 🔴 5600 lines", conclusion: "failure", head_sha: HEAD_SHA }]);
   });
 
   test("uses the head sha of the event, not GITHUB_SHA", async () => {
@@ -259,11 +297,11 @@ describe("API failures", () => {
   test("a read-only token at a fail threshold still fails the job", async () => {
     github.forbid.add("comments");
     github.forbid.add("check-runs");
-    github.files = sized(5200);
+    github.files = sized(5600);
     const result = await github.runAction();
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain("::error::This PR changes 5200 lines");
-    expect(result.summary).toContain("5200 lines");
+    expect(result.stdout).toContain("::error::This PR changes 5600 lines");
+    expect(result.summary).toContain("5600 lines");
   });
 
   test("any other error on the comment fails the run with its status", async () => {

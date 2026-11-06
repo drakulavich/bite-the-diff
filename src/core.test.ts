@@ -43,12 +43,14 @@ describe("countLines", () => {
 
 describe("decide, each row of the outcomes table at its boundary", () => {
   const rows = [
-    { lines: 999, level: "none", threshold: null, icon: "", conclusion: "success", name: "bite-the-diff 999 lines", red: false },
-    { lines: 1000, level: "comment", threshold: 1000, icon: "🟡", conclusion: "neutral", name: "bite-the-diff 🟡 1000 lines", red: false },
-    { lines: 2999, level: "comment", threshold: 1000, icon: "🟡", conclusion: "neutral", name: "bite-the-diff 🟡 2999 lines", red: false },
-    { lines: 3000, level: "comment", threshold: 3000, icon: "🟠", conclusion: "neutral", name: "bite-the-diff 🟠 3000 lines", red: false },
-    { lines: 4999, level: "comment", threshold: 3000, icon: "🟠", conclusion: "neutral", name: "bite-the-diff 🟠 4999 lines", red: false },
-    { lines: 5000, level: "fail", threshold: 5000, icon: "🔴", conclusion: "failure", name: "bite-the-diff 🔴 5000 lines", red: true },
+    { lines: 999, level: "none", threshold: null, icon: "", conclusion: "success", name: "bite-the-diff 999 lines", red: false, redFrom: null },
+    { lines: 1000, level: "comment", threshold: 1000, icon: "🟡", conclusion: "neutral", name: "bite-the-diff 🟡 1000 lines", red: false, redFrom: null },
+    { lines: 2999, level: "comment", threshold: 1000, icon: "🟡", conclusion: "neutral", name: "bite-the-diff 🟡 2999 lines", red: false, redFrom: null },
+    { lines: 3000, level: "comment", threshold: 3000, icon: "🟠", conclusion: "neutral", name: "bite-the-diff 🟠 3000 lines", red: false, redFrom: null },
+    { lines: 4999, level: "comment", threshold: 3000, icon: "🟠", conclusion: "neutral", name: "bite-the-diff 🟠 4999 lines", red: false, redFrom: null },
+    { lines: 5000, level: "comment", threshold: 5000, icon: "🟠", conclusion: "neutral", name: "bite-the-diff 🟠 5000 lines", red: false, redFrom: 5500 },
+    { lines: 5499, level: "comment", threshold: 5000, icon: "🟠", conclusion: "neutral", name: "bite-the-diff 🟠 5499 lines", red: false, redFrom: 5500 },
+    { lines: 5500, level: "fail", threshold: 5000, icon: "🔴", conclusion: "failure", name: "bite-the-diff 🔴 5500 lines", red: true, redFrom: null },
   ];
 
   for (const row of rows) {
@@ -62,21 +64,27 @@ describe("decide, each row of the outcomes table at its boundary", () => {
         conclusion: row.conclusion as "success",
         checkName: row.name,
         failsJob: row.red,
+        redFrom: row.redFrom,
       });
     });
   }
 
-  test("5000 lines with the bypass label is neutral and green", () => {
-    expect(decide(5000, defaults, true)).toEqual({
-      lines: 5000,
+  test("5500 lines with the bypass label is neutral and green", () => {
+    expect(decide(5500, defaults, true)).toEqual({
+      lines: 5500,
       level: "fail",
       threshold: 5000,
       icon: "🟠",
       bypassed: true,
       conclusion: "neutral",
-      checkName: "bite-the-diff 🟠 5000 lines",
+      checkName: "bite-the-diff 🟠 5500 lines",
       failsJob: false,
+      redFrom: null,
     });
+  });
+
+  test("the bypass label changes nothing inside the tolerance", () => {
+    expect(decide(5499, defaults, true)).toEqual(decide(5499, defaults, false));
   });
 
   test("the bypass label changes nothing below a fail threshold", () => {
@@ -108,55 +116,106 @@ describe("decide with custom thresholds", () => {
     expect(decide(200, parseThresholds("100:fail"), true).checkName).toBe("bite-the-diff 🟠 200 lines");
   });
 
+  test("a custom fail threshold has its tolerance, rounded up", () => {
+    const custom = parseThresholds("1234:fail");
+    expect(decide(1233, custom, false).level).toBe("none");
+    expect(decide(1234, custom, false).level).toBe("comment");
+    expect(decide(1357, custom, false).redFrom).toBe(1358);
+    expect(decide(1358, custom, false).failsJob).toBe(true);
+  });
+
+  test("the tolerance has no floating-point error, where times 1.1 would give 3301", () => {
+    const custom = parseThresholds("3000:fail");
+    expect(decide(3299, custom, false).redFrom).toBe(3300);
+    expect(decide(3300, custom, false).level).toBe("fail");
+    expect(decide(3300, custom, false).failsJob).toBe(true);
+  });
+
+  test("the highest threshold reached applies while it sits in its tolerance", () => {
+    const decision = decide(1120, parseThresholds("1000:fail\n1050:fail"), false);
+    expect(decision.level).toBe("comment");
+    expect(decision.threshold).toBe(1050);
+    expect(decision.redFrom).toBe(1155);
+    expect(decision.failsJob).toBe(false);
+  });
+
+  test("a comment threshold has no tolerance", () => {
+    expect(decide(999, parseThresholds("1000:comment"), false).level).toBe("none");
+    expect(decide(1000, parseThresholds("1000:comment"), false).level).toBe("comment");
+  });
+
   test("no thresholds means no level", () => {
     expect(decide(100000, [], false).level).toBe("none");
   });
 });
 
 describe("commentBody", () => {
-  const soft = commentBody(decide(1240, defaults, false), { bypassLabel: label, cappedFiles: null });
-  const failed = commentBody(decide(5200, defaults, false), { bypassLabel: label, cappedFiles: null });
-  const bypassed = commentBody(decide(5200, defaults, true), { bypassLabel: label, cappedFiles: null });
+  const ways = (leaveWhole: string) =>
+    [
+      "<details>",
+      "<summary>🐘 Ways to cut it into bites</summary>",
+      "",
+      "- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`; rebase a child once its parent merges. For parts that depend on each other in sequence.",
+      "- **By file group:** separate PRs for files that need different reviewers. For a change that cuts across areas.",
+      "- **Horizontal:** shared code or stubs first, then what uses them. For layered code.",
+      "- **Vertical:** smaller slices of the feature, each working end to end. For feature work.",
+      "- **Refactoring apart:** refactoring in its own PR, before the behaviour change. For a PR that mixes the two.",
+      `- **Leave it whole:** ${leaveWhole}. For whole-file deletions, generated code and automated refactoring, where a reviewer only checks intent.`,
+      "</details>",
+      "",
+      "<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>",
+      "",
+    ].join("\n");
+  const excludeOnly = "add the path to `exclude`";
+  const excludeOrLabel = "add the path to `exclude` or add the label `elefante`";
+  const body = (lines: number, hasLabel: boolean, cappedFiles: number | null = null) =>
+    commentBody(decide(lines, defaults, hasLabel), { bypassLabel: label, cappedFiles });
 
-  test("starts with the hidden marker", () => {
-    expect(soft.startsWith("<!-- bite-the-diff -->\n")).toBe(true);
+  test("the lowest comment threshold", () => {
+    expect(body(1501, false)).toBe(
+      `<!-- bite-the-diff -->\n🟡 **1501 lines.** That's a lot of elephant for one bite (threshold: 1000).\n\n${ways(excludeOnly)}`,
+    );
   });
 
-  test("gives the icon, the count and the threshold", () => {
-    expect(soft).toContain("🟡 This PR changes 1240 lines, past the threshold of 1000.");
+  test("a higher comment threshold", () => {
+    expect(body(3100, false)).toBe(`<!-- bite-the-diff -->\n🟠 **3100 lines.** Bigger than one bite should be (threshold: 3000).\n\n${ways(excludeOnly)}`);
   });
 
-  for (const option of ["Stack", "By file group", "Horizontal", "Vertical", "Refactoring apart", "Leave it whole"]) {
-    test(`names the option ${option}`, () => {
-      expect(soft).toContain(`| ${option} |`);
+  for (const hasLabel of [false, true]) {
+    test(`inside the tolerance, hasLabel ${hasLabel}: the label is not mentioned`, () => {
+      expect(body(5200, hasLabel)).toBe(
+        `<!-- bite-the-diff -->\n🟠 **5200 lines.** Almost too much elephant: red from 5500 (threshold: 5000).\n\n${ways(excludeOnly)}`,
+      );
     });
   }
 
-  test("the stack option has the commands", () => {
-    expect(soft).toContain("`git switch -c`");
-    expect(soft).toContain("`gh pr create --base <parent branch>`");
-  });
-
-  test("the bypass label is named only once a fail threshold is reached", () => {
-    expect(soft).not.toContain(label);
-    expect(failed).toContain(
-      `🔴 This PR changes 5200 lines, past the failing threshold of 5000, so this check fails. To let it pass, add the label \`${label}\`.`,
+  test("a fail threshold without the label", () => {
+    expect(body(5600, false)).toBe(
+      `<!-- bite-the-diff -->\n🔴 **5600 lines.** Too much elephant: this check stays red (threshold: 5000).\n\nCan't be cut? Add the label \`elefante\`.\n\n${ways(excludeOrLabel)}`,
     );
-    expect(failed).toContain(`Exclude the path with \`exclude\` or add the label \`${label}\``);
   });
 
-  test("says the label let it pass", () => {
-    expect(bypassed).toContain(`🟠 This PR changes 5200 lines, past the failing threshold of 5000. The label \`${label}\` let it pass.`);
-    expect(bypassed).not.toContain("so this check fails");
+  test("a fail threshold with the label", () => {
+    expect(body(5600, true)).toBe(`<!-- bite-the-diff -->\n🐘 **5600 lines.** The \`elefante\` label let this one through whole.\n\n${ways(excludeOrLabel)}`);
   });
 
-  test("says when the count skipped exclude because of the file cap", () => {
-    const capped = commentBody(decide(5200, defaults, false), { bypassLabel: label, cappedFiles: 3500 });
-    expect(capped).toContain("This PR has 3500 changed files and the API lists 3000, so the count is the PR total and `exclude` was not applied.");
-    expect(soft).not.toContain("the API lists");
+  test("the file cap sentence sits between the headline and the block", () => {
+    expect(body(3100, false, 3500)).toBe(
+      `<!-- bite-the-diff -->\n🟠 **3100 lines.** Bigger than one bite should be (threshold: 3000).\n\nThis PR has 3500 changed files and the API lists 3000, so the count is the PR total and \`exclude\` was not applied.\n\n${ways(excludeOnly)}`,
+    );
+  });
+
+  test("custom thresholds: the wording follows the icon and the action", () => {
+    const custom = parseThresholds("100:fail\n500:comment\n900:comment");
+    const text = (lines: number) => commentBody(decide(lines, custom, false), { bypassLabel: label, cappedFiles: null });
+    expect(text(200)).toContain("🔴 **200 lines.** Too much elephant: this check stays red (threshold: 100).");
+    expect(text(600)).toContain("🟡 **600 lines.** That's a lot of elephant for one bite (threshold: 500).");
+    expect(text(950)).toContain("🟠 **950 lines.** Bigger than one bite should be (threshold: 900).");
   });
 });
 
 test("underThresholdsBody keeps the marker and gives the new count", () => {
-  expect(underThresholdsBody(40)).toBe("<!-- bite-the-diff -->\nThis PR now changes 40 lines, under the thresholds.\n");
+  expect(underThresholdsBody(40)).toBe(
+    "<!-- bite-the-diff -->\n✅ **40 lines.** Bite-sized again.\n\n<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>\n",
+  );
 });

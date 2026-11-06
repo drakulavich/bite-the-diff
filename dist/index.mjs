@@ -1745,6 +1745,7 @@ var import_picomatch = __toESM(require_picomatch2(), 1);
 var MARKER = "<!-- bite-the-diff -->";
 var CHECK_PREFIX = "bite-the-diff ";
 var MAX_LISTED_FILES = 3000;
+var FOOTER = "<sub>\uD83D\uDC18 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>";
 function parseThresholds(text) {
   return text.split(`
 `).map((line) => line.trim()).filter(Boolean).map((line) => {
@@ -1769,7 +1770,22 @@ function decide(lines, thresholds, hasBypassLabel) {
       bypassed: false,
       conclusion: "success",
       checkName: `${CHECK_PREFIX}${lines} lines`,
-      failsJob: false
+      failsJob: false,
+      redFrom: null
+    };
+  }
+  const redFrom = Math.ceil(reached.lines * 11 / 10);
+  if (reached.action === "fail" && lines < redFrom) {
+    return {
+      lines,
+      level: "comment",
+      threshold: reached.lines,
+      icon: "\uD83D\uDFE0",
+      bypassed: false,
+      conclusion: "neutral",
+      checkName: `${CHECK_PREFIX}\uD83D\uDFE0 ${lines} lines`,
+      failsJob: false,
+      redFrom
     };
   }
   const bypassed = reached.action === "fail" && hasBypassLabel;
@@ -1784,37 +1800,43 @@ function decide(lines, thresholds, hasBypassLabel) {
     bypassed,
     conclusion: failsJob ? "failure" : "neutral",
     checkName: `${CHECK_PREFIX}${icon} ${lines} lines`,
-    failsJob
+    failsJob,
+    redFrom: null
   };
 }
 function commentBody(decision, { bypassLabel, cappedFiles }) {
-  const { lines, threshold, icon, level, bypassed } = decision;
+  const { lines, threshold, icon, level, bypassed, redFrom } = decision;
   const reachedFail = level === "fail";
-  const headline = reachedFail ? `${icon} This PR changes ${lines} lines, past the failing threshold of ${threshold}${bypassed ? `. The label \`${bypassLabel}\` let it pass.` : `, so this check fails. To let it pass, add the label \`${bypassLabel}\`.`}` : `${icon} This PR changes ${lines} lines, past the threshold of ${threshold}.`;
+  const count = `**${lines} lines.**`;
+  const headline = redFrom !== null ? [`${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).`] : bypassed ? [`\uD83D\uDC18 ${count} The \`${bypassLabel}\` label let this one through whole.`] : reachedFail ? [`${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).`, "", `Can't be cut? Add the label \`${bypassLabel}\`.`] : icon === "\uD83D\uDFE1" ? [`${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).`] : [`${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`];
   const capped = cappedFiles === null ? [] : [`This PR has ${cappedFiles} changed files and the API lists ${MAX_LISTED_FILES}, so the count is the PR total and \`exclude\` was not applied.`, ""];
-  const leaveWhole = reachedFail ? `Exclude the path with \`exclude\` or add the label \`${bypassLabel}\`` : "Exclude the path with `exclude`";
+  const leaveWhole = reachedFail ? `add the path to \`exclude\` or add the label \`${bypassLabel}\`` : "add the path to `exclude`";
   return [
     MARKER,
-    headline,
+    ...headline,
     "",
     ...capped,
-    "A diff this size is hard to review. Whoever acts on this PR, agent or person, can pick one of these:",
+    "<details>",
+    "<summary>\uD83D\uDC18 Ways to cut it into bites</summary>",
     "",
-    "| Option | How | When |",
-    "|---|---|---|",
-    "| Stack | Land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`, and rebase a child once its parent merges | The parts depend on each other in sequence |",
-    "| By file group | Separate PRs for groups of files that need different reviewers | The change cuts across areas |",
-    "| Horizontal | Shared code or stubs first, then what uses them | Layered code |",
-    "| Vertical | Smaller slices of the feature, each working end to end | Feature work |",
-    "| Refactoring apart | Refactoring in its own PR, before the behaviour change | The PR mixes the two |",
-    `| Leave it whole | ${leaveWhole} | Whole-file deletions, generated code, automated refactoring: a reviewer only checks intent |`,
+    "- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`; rebase a child once its parent merges. For parts that depend on each other in sequence.",
+    "- **By file group:** separate PRs for files that need different reviewers. For a change that cuts across areas.",
+    "- **Horizontal:** shared code or stubs first, then what uses them. For layered code.",
+    "- **Vertical:** smaller slices of the feature, each working end to end. For feature work.",
+    "- **Refactoring apart:** refactoring in its own PR, before the behaviour change. For a PR that mixes the two.",
+    `- **Leave it whole:** ${leaveWhole}. For whole-file deletions, generated code and automated refactoring, where a reviewer only checks intent.`,
+    "</details>",
+    "",
+    FOOTER,
     ""
   ].join(`
 `);
 }
 function underThresholdsBody(lines) {
   return `${MARKER}
-This PR now changes ${lines} lines, under the thresholds.
+✅ **${lines} lines.** Bite-sized again.
+
+${FOOTER}
 `;
 }
 
