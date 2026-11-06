@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { commentBody, countLines, decide, parseThresholds, underThresholdsBody } from "./core.ts";
 
 const defaults = parseThresholds("1000:comment\n3000:comment\n5000:fail\n");
-const label = "bite-the-diff/skip";
+const label = "elefante";
 
 describe("parseThresholds", () => {
   test("reads lines and actions, skipping blank lines and spaces", () => {

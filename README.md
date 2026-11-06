@@ -48,7 +48,7 @@ To make the limit binding, require the job (`bite-the-diff` in the workflow abov
 |---|---|---|
 | `thresholds` | `1000:comment`, `3000:comment`, `5000:fail`, one per line | Lines and action per threshold |
 | `exclude` | empty | Globs of paths left out of the count, one per line |
-| `bypass-label` | `bite-the-diff/skip` | A failed threshold passes when the PR has this label |
+| `bypass-label` | `elefante` | A failed threshold passes when the PR has this label |
 | `token` | `${{ github.token }}` | Needs `pull-requests: write` and `checks: write` |
 
 Only the highest threshold reached applies: with `1000:fail` and `5000:comment`, 6000 lines only comment. The lowest `comment` threshold gets 🟡, every other soft status 🟠, and a `fail` without the label 🔴.
