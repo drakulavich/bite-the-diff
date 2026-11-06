@@ -1,0 +1,11 @@
+telemetry = false
+
+[install]
+saveTextLockfile = true
+
+# Keeps `bun test` out of sibling worktrees under .worktrees/.
+[test]
+root = "src"
+
+[fmt]
+printWidth = 160
