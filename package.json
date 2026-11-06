@@ -1,0 +1,21 @@
+{
+  "name": "bite-the-diff",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build": "bun build src/main.ts --target=node --format=esm --outfile=dist/index.mjs",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "picomatch": "4"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@types/node": "24",
+    "@types/picomatch": "^4.0.3",
+    "typescript": "^7.0.2"
+  }
+}
