@@ -16,3 +16,100 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test
+
+  dist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: git diff --exit-code -- dist/
+
+  self-test:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    concurrency:
+      group: self-test-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.number }}
+      SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: yellow
+        uses: ./
+        with:
+          exclude: dist/**
+          thresholds: |
+            1:comment
+            1000000:comment
+      - run: .github/self-test-assert.sh "bite-the-diff 🟡 ${{ steps.yellow.outputs.lines }} lines" neutral skipping "🟡 This PR changes ${{ steps.yellow.outputs.lines }} lines, past the threshold of 1."
+
+      - id: orange
+        uses: ./
+        with:
+          exclude: dist/**
+          thresholds: |
+            1:comment
+            2:comment
+      - run: .github/self-test-assert.sh "bite-the-diff 🟠 ${{ steps.orange.outputs.lines }} lines" neutral skipping "🟠 This PR changes ${{ steps.orange.outputs.lines }} lines, past the threshold of 2."
+
+      - id: red
+        continue-on-error: true
+        uses: ./
+        with:
+          exclude: dist/**
+          thresholds: 1:fail
+      - run: test "${{ steps.red.outcome }}" = failure
+      - run: .github/self-test-assert.sh "bite-the-diff 🔴 ${{ steps.red.outputs.lines }} lines" failure fail "so this check fails"
+
+      - name: Put the bypass label on the event, as a labeled event carries it
+        run: |
+          jq '.pull_request.labels += [{"name": "self-test-bypass"}]' "$GITHUB_EVENT_PATH" > event.json
+          cp event.json "$GITHUB_EVENT_PATH"
+      - id: bypassed
+        uses: ./
+        with:
+          exclude: dist/**
+          thresholds: 1:fail
+          bypass-label: self-test-bypass
+      - run: test "${{ steps.bypassed.outcome }}" = success && test "${{ steps.bypassed.outputs.level }}" = fail
+      - run: .github/self-test-assert.sh "bite-the-diff 🟠 ${{ steps.bypassed.outputs.lines }} lines" neutral skipping "let it pass"
+
+      - id: under
+        uses: ./
+        with:
+          exclude: dist/**
+          thresholds: 1000000:comment
+      - run: test "${{ steps.under.outputs.level }}" = none
+      - run: .github/self-test-assert.sh "bite-the-diff ${{ steps.under.outputs.lines }} lines" success pass "under the thresholds"
+
+  self-test-read-only:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    steps:
+      - uses: actions/checkout@v7
+      - id: soft
+        uses: ./
+        with:
+          thresholds: 1:comment
+      - run: test "${{ steps.soft.outcome }}" = success && test "${{ steps.soft.outputs.level }}" = comment
+      - id: hard
+        continue-on-error: true
+        uses: ./
+        with:
+          thresholds: 1:fail
+      - run: test "${{ steps.hard.outcome }}" = failure
