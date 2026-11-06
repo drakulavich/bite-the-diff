@@ -1908,7 +1908,7 @@ async function deleteComment(id) {
   }
 }
 async function updateComment(pr, decision, capped) {
-  const existing = await findFirst(pages(`/issues/${pr.number}/comments`), (comment) => comment.body.includes(MARKER));
+  const existing = await findFirst(pages(`/issues/${pr.number}/comments`), (comment) => comment.body.startsWith(MARKER));
   if (decision.level === "none") {
     if (existing)
       await deleteComment(existing.id);

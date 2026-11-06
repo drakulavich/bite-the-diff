@@ -329,6 +329,29 @@ describe("one line, one file", () => {
   });
 });
 
+describe("a person's comment that contains the marker", () => {
+  const quoted = { id: 7, body: `Why does the action leave ${MARKER} in its text?` };
+
+  test("over a threshold: it stays untouched and a new comment is created", async () => {
+    github.comments = [quoted];
+    github.files = sized(1240);
+    await github.runAction();
+    expect(github.comments[0]).toEqual({ id: 7, body: `Why does the action leave ${MARKER} in its text?` });
+    expect(github.comments).toHaveLength(2);
+    expect(github.comments[1]!.body).toContain("🟡 **1240 lines.**");
+    expect(patches()).toEqual([]);
+    expect(posts()).toContain("POST /issues/42/comments");
+  });
+
+  test("under the thresholds: it is not deleted", async () => {
+    github.comments = [quoted];
+    github.files = sized(40);
+    await github.runAction();
+    expect(deletes()).toEqual([]);
+    expect(github.comments).toEqual([{ id: 7, body: `Why does the action leave ${MARKER} in its text?` }]);
+  });
+});
+
 describe("at most one comment", () => {
   test("a marker comment past the first page is updated, not duplicated", async () => {
     github.comments = Array.from({ length: 130 }, (_, i) => ({ id: i + 1, body: `chat ${i}` }));

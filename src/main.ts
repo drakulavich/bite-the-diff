@@ -74,7 +74,7 @@ async function deleteComment(id: number) {
 }
 
 async function updateComment(pr: PullRequest, decision: Decision, capped: boolean) {
-  const existing = await findFirst(pages<{ id: number; body: string }>(`/issues/${pr.number}/comments`), (comment) => comment.body.includes(MARKER));
+  const existing = await findFirst(pages<{ id: number; body: string }>(`/issues/${pr.number}/comments`), (comment) => comment.body.startsWith(MARKER));
   if (decision.level === "none") {
     if (existing) await deleteComment(existing.id);
     return;
