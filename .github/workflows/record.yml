@@ -1,0 +1,11 @@
+name: record
+on:
+  pull_request:
+    types: [labeled]
+jobs:
+  event:
+    runs-on: ubuntu-latest
+    steps:
+      - run: mkdir out && cp "$GITHUB_EVENT_PATH" out/event.json
+      - uses: actions/upload-artifact@v7
+        with: { name: 'event-${{ github.event.action }}', path: out/ }
