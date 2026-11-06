@@ -1,0 +1,54 @@
+name: record
+on:
+  pull_request:
+    types: [opened]
+env:
+  API: ${{ github.api_url }}/repos/${{ github.repository }}
+  PR: ${{ github.event.pull_request.number }}
+jobs:
+  write:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      checks: write
+    outputs:
+      leftover: ${{ steps.leftover.outputs.id }}
+    steps:
+      - name: DELETE a comment, then DELETE it again
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          mkdir out
+          call() { curl -sS -H "authorization: Bearer $TOKEN" -H "accept: application/vnd.github+json" -H "x-github-api-version: 2022-11-28" "$@"; }
+          id=$(call -X POST "$API/issues/$PR/comments" -d '{"body":"<!-- record --> delete me"}' | jq .id)
+          call -X DELETE -o out/delete.body -w '%{http_code}' "$API/issues/comments/$id" > out/delete.status
+          call -X DELETE -o out/gone.body -w '%{http_code}' "$API/issues/comments/$id" > out/gone.status
+          call -o out/after.body -w '%{http_code}' "$API/issues/comments/$id" > out/after.status
+          wc -c out/delete.body
+          head -c 300 out/*.status
+      - id: leftover
+        name: a comment for the read-only job
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          id=$(curl -sS -H "authorization: Bearer $TOKEN" -H "accept: application/vnd.github+json" -H "x-github-api-version: 2022-11-28" -X POST "$API/issues/$PR/comments" -d '{"body":"<!-- record --> read-only target"}' | jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with: { name: write, path: out/ }
+  read-only:
+    needs: write
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+      checks: read
+    steps:
+      - name: DELETE with a read-only token
+        env:
+          TOKEN: ${{ github.token }}
+          ID: ${{ needs.write.outputs.leftover }}
+        run: |
+          mkdir out
+          curl -sS -H "authorization: Bearer $TOKEN" -H "accept: application/vnd.github+json" -H "x-github-api-version: 2022-11-28" -X DELETE -o out/forbidden.body -w '%{http_code}' "$API/issues/comments/$ID" > out/forbidden.status
+          cat out/forbidden.status
+      - uses: actions/upload-artifact@v7
+        with: { name: read-only, path: out/ }
