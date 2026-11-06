@@ -1,11 +1,11 @@
 import picomatch from "picomatch";
 
-export const MARKER = "<!-- bite-the-diff -->";
-export const CHECK_PREFIX = "bite-the-diff ";
-export const MAX_LISTED_FILES = 3000;
+const MARKER = "<!-- bite-the-diff -->";
+const CHECK_PREFIX = "bite-the-diff ";
+const MAX_LISTED_FILES = 3000;
 
 export type PrFile = { filename: string; additions: number; deletions: number };
-export type Action = "comment" | "fail";
+type Action = "comment" | "fail";
 export type Threshold = { lines: number; action: Action };
 
 export type Decision = {
