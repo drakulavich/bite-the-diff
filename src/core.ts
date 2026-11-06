@@ -8,6 +8,7 @@ const FOOTER = "<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-th
 export type PrFile = { filename: string; additions: number; deletions: number };
 type Action = "comment" | "fail";
 export type Threshold = { lines: number; action: Action };
+type FilesOver = { files: number; threshold: number };
 
 export type Decision = {
   lines: number;
@@ -19,6 +20,7 @@ export type Decision = {
   checkName: string;
   failsJob: boolean;
   redFrom: number | null;
+  filesOver?: FilesOver;
 };
 
 export function parseThresholds(text: string): Threshold[] {
@@ -33,9 +35,22 @@ export function parseThresholds(text: string): Threshold[] {
     });
 }
 
-export function countLines(files: PrFile[], exclude: string[]): number {
+function included(files: PrFile[], exclude: string[]): PrFile[] {
   const excluded = exclude.length ? picomatch(exclude, { dot: true }) : () => false;
-  return files.filter((file) => !excluded(file.filename)).reduce((sum, file) => sum + file.additions + file.deletions, 0);
+  return files.filter((file) => !excluded(file.filename));
+}
+
+export function parseFileThreshold(text: string): number {
+  if (!/^\d+$/.test(text)) throw new Error(`Bad file-threshold: ${text}`);
+  return Number(text);
+}
+
+export function countFiles(files: PrFile[], exclude: string[]): number {
+  return included(files, exclude).length;
+}
+
+export function countLines(files: PrFile[], exclude: string[]): number {
+  return included(files, exclude).reduce((sum, file) => sum + file.additions + file.deletions, 0);
 }
 
 export function decide(lines: number, thresholds: Threshold[], hasBypassLabel: boolean): Decision {
@@ -89,21 +104,36 @@ export function decide(lines: number, thresholds: Threshold[], hasBypassLabel: b
   };
 }
 
+export function withFileThreshold(decision: Decision, files: number, fileThreshold: number): Decision {
+  if (fileThreshold === 0 || files < fileThreshold) return decision;
+  const filesOver = { files, threshold: fileThreshold };
+  if (decision.level === "none") {
+    return { ...decision, level: "comment", icon: "🟡", conclusion: "neutral", checkName: `${CHECK_PREFIX}🟡 ${files} files`, filesOver };
+  }
+  return { ...decision, checkName: `${decision.checkName}, ${files} files`, filesOver };
+}
+
 export function commentBody(decision: Decision, { bypassLabel, cappedFiles }: { bypassLabel: string; cappedFiles: number | null }): string {
-  const { lines, threshold, icon, level, bypassed, redFrom } = decision;
+  const { lines, threshold, icon, level, bypassed, redFrom, filesOver } = decision;
   const reachedFail = level === "fail";
   const count = `**${lines} lines.**`;
 
   const headline =
-    redFrom !== null
-      ? [`${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).`]
-      : bypassed
-        ? [`🐘 ${count} The \`${bypassLabel}\` label let this one through whole.`]
-        : reachedFail
-          ? [`${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).`, "", `Can't be cut? Add the label \`${bypassLabel}\`.`]
-          : icon === "🟡"
-            ? [`${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).`]
-            : [`${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`];
+    filesOver && threshold === null
+      ? `${icon} **${filesOver.files} files.** A lot of elephant to chew at once (threshold: ${filesOver.threshold}).`
+      : redFrom !== null
+        ? `${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).`
+        : bypassed
+          ? `🐘 ${count} The \`${bypassLabel}\` label let this one through whole.`
+          : reachedFail
+            ? `${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).`
+            : icon === "🟡"
+              ? `${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).`
+              : `${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`;
+
+  const alsoFiles = filesOver && threshold !== null ? [`Also ${filesOver.files} files (threshold: ${filesOver.threshold}).`] : [];
+
+  const labelHint = reachedFail && !bypassed ? ["", `Can't be cut? Add the label \`${bypassLabel}\`.`] : [];
 
   const capped =
     cappedFiles === null
@@ -114,13 +144,15 @@ export function commentBody(decision: Decision, { bypassLabel, cappedFiles }: { 
 
   return [
     MARKER,
-    ...headline,
+    headline,
+    ...alsoFiles,
+    ...labelHint,
     "",
     ...capped,
     "<details>",
     "<summary>🐘 Ways to cut it into bites</summary>",
     "",
-    "- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`; rebase a child once its parent merges. For parts that depend on each other in sequence.",
+    "- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`. When the parent merges, retarget and rebase the child before deleting the parent's branch: deleting it first closes the child. For parts that depend on each other in sequence.",
     "- **By file group:** separate PRs for files that need different reviewers. For a change that cuts across areas.",
     "- **Horizontal:** shared code or stubs first, then what uses them. For layered code.",
     "- **Vertical:** smaller slices of the feature, each working end to end. For feature work.",

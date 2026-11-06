@@ -1,6 +1,6 @@
 # bite-the-diff
 
-A GitHub Action for PRs that are too big to review. It counts a PR's changed lines against its base. Over a threshold, it posts one comment that says so and lists the ways to split the PR, so an agent or a person reading the PR needs nothing else installed. Past the failing threshold's 10% tolerance, the job goes red.
+A GitHub Action for PRs that are too big to review. It counts a PR's changed lines and files against its base. Over a threshold, it posts one comment that says so and lists the ways to split the PR, so an agent or a person reading the PR needs nothing else installed. Past the failing line threshold's 10% tolerance, the job goes red. The file threshold only comments.
 
 ## Usage
 
@@ -39,6 +39,14 @@ With the default thresholds:
 | 5500 or more | created or updated, names the bypass label | `failure`, `bite-the-diff 🔴 5600 lines` | red |
 | 5500 or more, with the bypass label | created or updated, says the label let it pass | `neutral`, `bite-the-diff 🟠 5600 lines` | green |
 
+The default file threshold adds to that table:
+
+| Files | Lines | Comment | Check run | Job |
+|---|---|---|---|---|
+| under 50 | any | as above, nothing about files | as above, nothing about files | as above |
+| 50 or more | under 1000 | created or updated: `🟡 **63 files.** A lot of elephant to chew at once (threshold: 50).` | `neutral`, `bite-the-diff 🟡 63 files` | green |
+| 50 or more | 1000 or more | as above for the lines, plus the line `Also 63 files (threshold: 50).` | as above for the lines, with the files in the name: `bite-the-diff 🟠 3100 lines, 63 files` | as above for the lines |
+
 A PR has at most one comment from this action and a commit at most one check run. Later runs update them. Deleted lines count, and so does a removed file. A stacked PR's base is its parent, so each layer counts only its own diff.
 
 To make the limit binding, require the job (`bite-the-diff` in the workflow above), which fails only past a `fail` threshold's tolerance. The check run's name changes with the size, so it cannot be a required check.
@@ -48,6 +56,7 @@ To make the limit binding, require the job (`bite-the-diff` in the workflow abov
 | Input | Default | Meaning |
 |---|---|---|
 | `thresholds` | `1000:comment`, `3000:comment`, `5000:fail`, one per line | Lines and action per threshold. A `fail` threshold has a 10% tolerance: `5000:fail` goes red from 5500 |
+| `file-threshold` | `50` | Files that get a comment, counted after `exclude`. It never fails the job and the bypass label has no effect on it. `0` turns it off |
 | `exclude` | empty | Globs of paths left out of the count, one per line |
 | `bypass-label` | `elefante` | A failed threshold passes when the PR has this label |
 | `token` | `${{ github.token }}` | Needs `pull-requests: write` and `checks: write` |
@@ -56,14 +65,15 @@ Only the highest threshold reached applies: with `1000:fail` and `5000:comment`,
 
 From a `fail` threshold up to 10% above it, rounded up, the PR is treated as `comment`: 🟠, a `neutral` check, a green job, and the bypass label has no effect. `comment` thresholds have no tolerance.
 
-`GET /pulls/{n}/files` lists at most 3000 files. Above that, the count is the PR's total from the event, without `exclude`, and the comment says so.
+`GET /pulls/{n}/files` lists at most 3000 files. Above that, the line and file counts are the PR's totals from the event, without `exclude`, and the comment says so.
 
 ## Outputs
 
 | Output | Meaning |
 |---|---|
 | `lines` | Changed lines counted |
-| `level` | The action of the threshold reached: `none`, `comment` or `fail`. A bypassed PR still reports `fail`, a PR inside a `fail` threshold's tolerance `comment` |
+| `level` | The action of the threshold reached: `none`, `comment` or `fail`. A bypassed PR still reports `fail`, a PR inside a `fail` threshold's tolerance `comment`. A PR that reached only the file threshold reports `comment` |
+| `files` | Changed files counted |
 
 ## Limits
 

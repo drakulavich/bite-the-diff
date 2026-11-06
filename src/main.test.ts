@@ -18,7 +18,7 @@ describe("the count", () => {
   test("sums every file over several pages, deletions included, into the lines output", async () => {
     github.files = Array.from({ length: 250 }, (_, i) => ({ filename: `f${i}.ts`, additions: 3, deletions: 1 }));
     const result = await github.runAction();
-    expect(result.output).toBe("lines=1000\nlevel=comment\n");
+    expect(result.output).toBe("lines=1000\nlevel=comment\nfiles=250\n");
     expect(github.requests).toContain(`GET /pulls/42/files?per_page=100&page=3`);
   });
 
@@ -28,7 +28,7 @@ describe("the count", () => {
       { filename: "src/a.ts", additions: 40, deletions: 2 },
     ];
     const result = await github.runAction({ inputs: { exclude: " dist/**\n\n*.lock\n" } });
-    expect(result.output).toBe("lines=42\nlevel=none\n");
+    expect(result.output).toBe("lines=42\nlevel=none\nfiles=1\n");
     expect(result.exitCode).toBe(0);
   });
 
@@ -38,7 +38,7 @@ describe("the count", () => {
       inputs: { exclude: "**" },
       labels: [LABEL],
     });
-    expect(result.output).toBe("lines=5600\nlevel=fail\n");
+    expect(result.output).toBe("lines=5600\nlevel=fail\nfiles=3001\n");
     expect(github.requests.some((r) => r.includes("/files"))).toBe(false);
     expect(github.comments[0]!.body).toContain("This PR has 3001 changed files and the API lists 3000");
   });
@@ -46,7 +46,7 @@ describe("the count", () => {
   test("at exactly 3000 files, it still lists them", async () => {
     github.files = Array.from({ length: 3000 }, (_, i) => ({ filename: `f${i}.ts`, additions: 1, deletions: 0 }));
     const result = await github.runAction({ prFields: { additions: 9999, deletions: 0 } });
-    expect(result.output).toBe("lines=3000\nlevel=comment\n");
+    expect(result.output).toBe("lines=3000\nlevel=comment\nfiles=3000\n");
   });
 });
 
@@ -109,7 +109,7 @@ describe("the outcomes table at each boundary, on a PR with nothing from this ac
       github.files = sized(row.lines);
       const result = await github.runAction();
       expect(result.exitCode).toBe(row.exitCode);
-      expect(result.output).toBe(`lines=${row.lines}\nlevel=${row.level}\n`);
+      expect(result.output).toBe(`lines=${row.lines}\nlevel=${row.level}\nfiles=1\n`);
       expect(result.summary).toBe(`bite-the-diff: ${row.lines} lines, level ${row.level}.\n`);
       if (row.comment) {
         expect(github.comments).toHaveLength(1);
@@ -131,7 +131,7 @@ describe("the outcomes table at each boundary, on a PR with nothing from this ac
     github.files = sized(5500);
     const result = await github.runAction({ labels: [LABEL] });
     expect(result.exitCode).toBe(0);
-    expect(result.output).toBe("lines=5500\nlevel=fail\n");
+    expect(result.output).toBe("lines=5500\nlevel=fail\nfiles=1\n");
     expect(github.comments[0]!.body).toContain(`🐘 **5500 lines.** The \`${LABEL}\` label let this one through whole.`);
     expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🟠 5500 lines", "neutral"]]);
   });
@@ -153,7 +153,7 @@ describe("the outcomes table at each boundary, on a PR with nothing from this ac
     github.files = sized(5200);
     const result = await github.runAction({ labels: [LABEL] });
     expect(result.exitCode).toBe(0);
-    expect(result.output).toBe("lines=5200\nlevel=comment\n");
+    expect(result.output).toBe("lines=5200\nlevel=comment\nfiles=1\n");
     expect(github.comments[0]!.body).toContain("🟠 **5200 lines.** Almost too much elephant: red from 5500 (threshold: 5000).");
     expect(github.comments[0]!.body).not.toContain(LABEL);
     expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🟠 5200 lines", "neutral"]]);
@@ -163,7 +163,7 @@ describe("the outcomes table at each boundary, on a PR with nothing from this ac
     github.files = sized(1357);
     const inside = await github.runAction({ inputs: { thresholds: "1234:fail" } });
     expect(inside.exitCode).toBe(0);
-    expect(inside.output).toBe("lines=1357\nlevel=comment\n");
+    expect(inside.output).toBe("lines=1357\nlevel=comment\nfiles=1\n");
     expect(github.comments[0]!.body).toContain("🟠 **1357 lines.** Almost too much elephant: red from 1358 (threshold: 1234).");
     github.files = sized(1358);
     const past = await github.runAction({ inputs: { thresholds: "1234:fail" } });
@@ -174,7 +174,7 @@ describe("the outcomes table at each boundary, on a PR with nothing from this ac
   test("the thresholds input applies", async () => {
     github.files = sized(6);
     const result = await github.runAction({ inputs: { thresholds: "5:fail" } });
-    expect(result.output).toBe("lines=6\nlevel=fail\n");
+    expect(result.output).toBe("lines=6\nlevel=fail\nfiles=1\n");
     expect(result.exitCode).toBe(1);
   });
 });
@@ -321,6 +321,212 @@ describe("API failures", () => {
   });
 });
 
+describe("file-threshold", () => {
+  const WAYS = [
+    "<details>",
+    "<summary>🐘 Ways to cut it into bites</summary>",
+    "",
+    "- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`. When the parent merges, retarget and rebase the child before deleting the parent's branch: deleting it first closes the child. For parts that depend on each other in sequence.",
+    "- **By file group:** separate PRs for files that need different reviewers. For a change that cuts across areas.",
+    "- **Horizontal:** shared code or stubs first, then what uses them. For layered code.",
+    "- **Vertical:** smaller slices of the feature, each working end to end. For feature work.",
+    "- **Refactoring apart:** refactoring in its own PR, before the behaviour change. For a PR that mixes the two.",
+    "- **Leave it whole:** add the path to `exclude`. For whole-file deletions, generated code and automated refactoring, where a reviewer only checks intent.",
+    "</details>",
+    "",
+    "<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>",
+    "",
+  ].join("\n");
+  const generated = Array.from({ length: 10 }, (_, i) => ({ filename: `dist/g${i}.mjs`, additions: 1, deletions: 0 }));
+  const spread = (files: number, lines: number) =>
+    Array.from({ length: files }, (_, i) => ({ filename: `src/f${i}.ts`, additions: i === 0 ? lines - files + 1 : 1, deletions: 0 }));
+  const checks = () => github.checkRuns.map((run) => [run.name, run.conclusion]);
+
+  test("49 files counted after exclude: nothing is written, though 59 changed", async () => {
+    github.files = [...spread(49, 49), ...generated];
+    const result = await github.runAction({ inputs: { exclude: "dist/**" } });
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBe("lines=49\nlevel=none\nfiles=49\n");
+    expect(result.summary).toBe("bite-the-diff: 49 lines, level none.\n");
+    expect(github.comments).toEqual([]);
+    expect(github.checkRuns).toEqual([]);
+  });
+
+  test("50 files counted after exclude: only files reached", async () => {
+    github.files = [...spread(50, 50), ...generated];
+    const result = await github.runAction({ inputs: { exclude: "dist/**" } });
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBe("lines=50\nlevel=comment\nfiles=50\n");
+    expect(result.summary).toBe("bite-the-diff: 50 lines, 50 files, level comment.\n");
+    expect(github.comments.map((c) => c.body)).toEqual([`${MARKER}\n🟡 **50 files.** A lot of elephant to chew at once (threshold: 50).\n\n${WAYS}`]);
+    expect(checks()).toEqual([["bite-the-diff 🟡 50 files", "neutral"]]);
+    expect(github.checkOutputs).toEqual([{ title: "50 lines, 50 files", summary: "Threshold reached: none. File threshold reached: 50." }]);
+  });
+
+  test("the input sets the threshold", async () => {
+    github.files = spread(2, 2);
+    expect((await github.runAction({ inputs: { "file-threshold": "3" } })).output).toBe("lines=2\nlevel=none\nfiles=2\n");
+    github.files = spread(3, 3);
+    await github.runAction({ inputs: { "file-threshold": "3" } });
+    expect(checks()).toEqual([["bite-the-diff 🟡 3 files", "neutral"]]);
+    expect(github.comments[0]!.body).toContain("🟡 **3 files.** A lot of elephant to chew at once (threshold: 3).");
+  });
+
+  test("0 turns it off, and the output still counts", async () => {
+    github.files = spread(63, 63);
+    const result = await github.runAction({ inputs: { "file-threshold": "0" } });
+    expect(result.output).toBe("lines=63\nlevel=none\nfiles=63\n");
+    expect(github.comments).toEqual([]);
+    expect(github.checkRuns).toEqual([]);
+  });
+
+  for (const bad of ["-1", "1.5", "many", "50 files", "1e3", ""]) {
+    test(`rejects "${bad}" before any API call`, async () => {
+      github.files = spread(63, 63);
+      const result = await github.runAction({ inputs: { "file-threshold": bad } });
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toContain(`::error::Bad file-threshold: ${bad}`);
+      expect(result.output).toBe("");
+      expect(github.requests).toEqual([]);
+    });
+  }
+
+  test("the bypass label has no effect when only files are reached", async () => {
+    github.files = spread(63, 63);
+    const result = await github.runAction({ labels: [LABEL] });
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBe("lines=63\nlevel=comment\nfiles=63\n");
+    expect(github.comments.map((c) => c.body)).toEqual([`${MARKER}\n🟡 **63 files.** A lot of elephant to chew at once (threshold: 50).\n\n${WAYS}`]);
+    expect(checks()).toEqual([["bite-the-diff 🟡 63 files", "neutral"]]);
+  });
+
+  describe("a line threshold reached too: the lines state decides, and the name and comment gain the files", () => {
+    const rows = [
+      {
+        lines: 1240,
+        labels: [],
+        level: "comment",
+        exitCode: 0,
+        check: ["bite-the-diff 🟡 1240 lines, 63 files", "neutral"],
+        comment: "🟡 **1240 lines.** That's a lot of elephant for one bite (threshold: 1000).\nAlso 63 files (threshold: 50).\n\n<details>",
+        title: "Threshold reached: 1000. File threshold reached: 50.",
+      },
+      {
+        lines: 3100,
+        labels: [],
+        level: "comment",
+        exitCode: 0,
+        check: ["bite-the-diff 🟠 3100 lines, 63 files", "neutral"],
+        comment: "🟠 **3100 lines.** Bigger than one bite should be (threshold: 3000).\nAlso 63 files (threshold: 50).\n\n<details>",
+        title: "Threshold reached: 3000. File threshold reached: 50.",
+      },
+      {
+        lines: 5200,
+        labels: [],
+        level: "comment",
+        exitCode: 0,
+        check: ["bite-the-diff 🟠 5200 lines, 63 files", "neutral"],
+        comment: "🟠 **5200 lines.** Almost too much elephant: red from 5500 (threshold: 5000).\nAlso 63 files (threshold: 50).\n\n<details>",
+        title: "Threshold reached: 5000. File threshold reached: 50.",
+      },
+      {
+        lines: 5600,
+        labels: [],
+        level: "fail",
+        exitCode: 1,
+        check: ["bite-the-diff 🔴 5600 lines, 63 files", "failure"],
+        comment: `🔴 **5600 lines.** Too much elephant: this check stays red (threshold: 5000).\nAlso 63 files (threshold: 50).\n\nCan't be cut? Add the label \`${LABEL}\`.\n\n<details>`,
+        title: "Threshold reached: 5000. File threshold reached: 50.",
+      },
+      {
+        lines: 5600,
+        labels: [LABEL],
+        level: "fail",
+        exitCode: 0,
+        check: ["bite-the-diff 🟠 5600 lines, 63 files", "neutral"],
+        comment: `🐘 **5600 lines.** The \`${LABEL}\` label let this one through whole.\nAlso 63 files (threshold: 50).\n\n<details>`,
+        title: "Threshold reached: 5000. File threshold reached: 50.",
+      },
+    ];
+
+    for (const row of rows) {
+      test(`${row.lines} lines, labels [${row.labels}]`, async () => {
+        github.files = spread(63, row.lines);
+        const result = await github.runAction({ labels: row.labels });
+        expect(result.exitCode).toBe(row.exitCode);
+        expect(result.output).toBe(`lines=${row.lines}\nlevel=${row.level}\nfiles=63\n`);
+        expect(result.summary).toBe(`bite-the-diff: ${row.lines} lines, 63 files, level ${row.level}.\n`);
+        expect(checks()).toEqual([row.check]);
+        expect(github.checkOutputs).toEqual([{ title: `${row.lines} lines, 63 files`, summary: row.title }]);
+        expect(github.comments).toHaveLength(1);
+        expect(github.comments[0]!.body.startsWith(`${MARKER}\n${row.comment}`)).toBe(true);
+      });
+    }
+  });
+
+  test("over the listing cap, only files reached: the event's changed_files, and the comment says so", async () => {
+    const result = await github.runAction({ prFields: { changed_files: 3001, additions: 30, deletions: 10 }, inputs: { exclude: "**" } });
+    expect(result.output).toBe("lines=40\nlevel=comment\nfiles=3001\n");
+    expect(github.requests.some((r) => r.includes("/files"))).toBe(false);
+    expect(checks()).toEqual([["bite-the-diff 🟡 3001 files", "neutral"]]);
+    expect(github.comments[0]!.body).toBe(
+      `${MARKER}\n🟡 **3001 files.** A lot of elephant to chew at once (threshold: 50).\n\nThis PR has 3001 changed files and the API lists 3000, so the count is the PR total and \`exclude\` was not applied.\n\n${WAYS}`,
+    );
+  });
+
+  test("over the listing cap, with a line threshold reached too", async () => {
+    const result = await github.runAction({ prFields: { changed_files: 3001, additions: 3000, deletions: 100 } });
+    expect(result.output).toBe("lines=3100\nlevel=comment\nfiles=3001\n");
+    expect(checks()).toEqual([["bite-the-diff 🟠 3100 lines, 3001 files", "neutral"]]);
+    expect(github.comments[0]!.body).toBe(
+      `${MARKER}\n🟠 **3100 lines.** Bigger than one bite should be (threshold: 3000).\nAlso 3001 files (threshold: 50).\n\nThis PR has 3001 changed files and the API lists 3000, so the count is the PR total and \`exclude\` was not applied.\n\n${WAYS}`,
+    );
+  });
+
+  test("files under the threshold: today's text, byte for byte", async () => {
+    github.files = spread(49, 1240);
+    const result = await github.runAction();
+    expect(result.summary).toBe("bite-the-diff: 1240 lines, level comment.\n");
+    expect(github.comments.map((c) => c.body)).toEqual([`${MARKER}\n🟡 **1240 lines.** That's a lot of elephant for one bite (threshold: 1000).\n\n${WAYS}`]);
+    expect(checks()).toEqual([["bite-the-diff 🟡 1240 lines", "neutral"]]);
+    expect(github.checkOutputs).toEqual([{ title: "1240 lines", summary: "Threshold reached: 1000." }]);
+  });
+
+  test("below both: the comment says bite-sized with the lines, and the same check run turns success", async () => {
+    github.files = spread(63, 63);
+    await github.runAction();
+    const { id } = github.checkRuns[0]!;
+    github.files = spread(4, 40);
+    const result = await github.runAction();
+    expect(result.output).toBe("lines=40\nlevel=none\nfiles=4\n");
+    expect(github.comments.map((c) => c.body)).toEqual([
+      `${MARKER}\n✅ **40 lines.** Bite-sized again.\n\n<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>\n`,
+    ]);
+    expect(github.checkRuns).toEqual([{ id, name: "bite-the-diff 40 lines", conclusion: "success", head_sha: HEAD_SHA }]);
+  });
+
+  test("one check run per commit through every name: files, lines and files, files again", async () => {
+    github.files = spread(63, 63);
+    await github.runAction();
+    const { id } = github.checkRuns[0]!;
+    github.files = spread(63, 3100);
+    await github.runAction();
+    expect(github.checkRuns).toEqual([{ id, name: "bite-the-diff 🟠 3100 lines, 63 files", conclusion: "neutral", head_sha: HEAD_SHA }]);
+    github.files = spread(63, 63);
+    await github.runAction();
+    expect(github.checkRuns).toEqual([{ id, name: "bite-the-diff 🟡 63 files", conclusion: "neutral", head_sha: HEAD_SHA }]);
+    expect(github.comments).toHaveLength(1);
+  });
+
+  test("a 403 names the files when they were reached", async () => {
+    github.forbid.add("comments");
+    github.files = spread(63, 63);
+    const result = await github.runAction();
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("::warning::bite-the-diff could not write the comment: the token got a 403. This PR changes 63 lines, 63 files.");
+  });
+});
+
 describe("bad configuration", () => {
   test("an event without a pull request fails the run", async () => {
     const result = await github.runAction({ eventFile: { action: "push" } });
@@ -343,7 +549,7 @@ test("the token from the input is sent", async () => {
 type ActionInput = { default: string };
 type ActionYml = {
   runs: unknown;
-  inputs: { thresholds: ActionInput; "bypass-label": ActionInput; token: ActionInput; exclude: ActionInput };
+  inputs: { thresholds: ActionInput; "file-threshold": ActionInput; "bypass-label": ActionInput; token: ActionInput; exclude: ActionInput };
   outputs: object;
 };
 
@@ -351,8 +557,9 @@ test("action.yml declares what the spec says", async () => {
   const action = Bun.YAML.parse(await Bun.file("action.yml").text()) as ActionYml;
   expect(action.runs).toEqual({ using: "node24", main: "dist/index.mjs" });
   expect(action.inputs.thresholds.default).toBe("1000:comment\n3000:comment\n5000:fail\n");
+  expect(action.inputs["file-threshold"].default).toBe("50");
   expect(action.inputs["bypass-label"].default).toBe(LABEL);
   expect(action.inputs.token.default).toBe(`\${{ github.token }}`);
   expect(action.inputs.exclude.default).toBe("");
-  expect(Object.keys(action.outputs)).toEqual(["lines", "level"]);
+  expect(Object.keys(action.outputs)).toEqual(["lines", "level", "files"]);
 });

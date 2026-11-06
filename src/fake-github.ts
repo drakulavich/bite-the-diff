@@ -8,7 +8,8 @@ export type FileSpec = { filename: string; additions: number; deletions: number 
 const PR_NUMBER = 42;
 export const HEAD_SHA = "aaaa1111";
 
-type WriteBody = { body: string; name: string; conclusion: string; head_sha: string };
+type CheckOutput = { title: string; summary: string };
+type WriteBody = { body: string; name: string; conclusion: string; head_sha: string; output: CheckOutput };
 
 const jsonResponse = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
@@ -22,6 +23,7 @@ export class FakeGitHub {
   files: FileSpec[] = [];
   comments: { id: number; body: string }[] = [];
   checkRuns: { id: number; name: string; conclusion: string; head_sha: string }[] = [];
+  checkOutputs: CheckOutput[] = [];
   requests: string[] = [];
   authorizations: (string | null)[] = [];
   forbid = new Set<"comments" | "check-runs">();
@@ -71,6 +73,7 @@ export class FakeGitHub {
     }
     if (route === "POST /check-runs") {
       const run = { id: this.nextId++, name: body.name, conclusion: body.conclusion, head_sha: body.head_sha };
+      this.checkOutputs.push(body.output);
       this.checkRuns.push(run);
       return jsonResponse(201, { ...recorded.checkRun, ...run });
     }
@@ -79,6 +82,7 @@ export class FakeGitHub {
       const run = this.checkRuns.find((r) => r.id === Number(checkMatch[1]))!;
       run.name = body.name;
       run.conclusion = body.conclusion;
+      this.checkOutputs.push(body.output);
       return jsonResponse(200, { ...recorded.checkRun, ...run });
     }
     return jsonResponse(404, { message: `fake has no route ${route}` });
@@ -109,6 +113,7 @@ export class FakeGitHub {
 
     const inputs = {
       thresholds: "1000:comment\n3000:comment\n5000:fail\n",
+      "file-threshold": "50",
       exclude: "",
       "bypass-label": "elefante",
       token: "fake-token",

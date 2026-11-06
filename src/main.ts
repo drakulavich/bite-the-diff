@@ -2,14 +2,17 @@ import { appendFileSync, readFileSync } from "node:fs";
 import {
   CHECK_PREFIX,
   commentBody,
+  countFiles,
   countLines,
   type Decision,
   decide,
   MARKER,
   MAX_LISTED_FILES,
   type PrFile,
+  parseFileThreshold,
   parseThresholds,
   underThresholdsBody,
+  withFileThreshold,
 } from "./core.ts";
 
 type PullRequest = {
@@ -60,6 +63,8 @@ async function findFirst<T>(all: AsyncIterable<T>, wanted: (item: T) => boolean)
   return undefined;
 }
 
+const size = ({ lines, filesOver }: Decision) => (filesOver ? `${lines} lines, ${filesOver.files} files` : `${lines} lines`);
+
 async function updateComment(pr: PullRequest, decision: Decision, capped: boolean) {
   const existing = await findFirst(pages<{ id: number; body: string }>(`/issues/${pr.number}/comments`), (comment) => comment.body.includes(MARKER));
   const body =
@@ -82,18 +87,21 @@ async function updateCheckRun(pr: PullRequest, decision: Decision) {
     name: decision.checkName,
     status: "completed",
     conclusion: decision.conclusion,
-    output: { title: `${decision.lines} lines`, summary: `Threshold reached: ${decision.threshold ?? "none"}.` },
+    output: {
+      title: size(decision),
+      summary: `Threshold reached: ${decision.threshold ?? "none"}.${decision.filesOver ? ` File threshold reached: ${decision.filesOver.threshold}.` : ""}`,
+    },
   };
   if (existing) await api("PATCH", `/check-runs/${existing.id}`, fields);
   else if (decision.level !== "none") await api("POST", "/check-runs", { ...fields, head_sha: pr.head.sha });
 }
 
-async function warnOn403(what: string, lines: number, write: () => Promise<void>) {
+async function warnOn403(what: string, changed: string, write: () => Promise<void>) {
   try {
     await write();
   } catch (error) {
     if (!(error instanceof ApiError && error.status === 403)) throw error;
-    console.log(`::warning::bite-the-diff could not write the ${what}: the token got a 403. This PR changes ${lines} lines.`);
+    console.log(`::warning::bite-the-diff could not write the ${what}: the token got a 403. This PR changes ${changed}.`);
   }
 }
 
@@ -103,23 +111,30 @@ async function run() {
   if (!pr) throw new Error("bite-the-diff runs on pull_request events");
 
   const thresholds = parseThresholds(input("thresholds"));
+  const fileThreshold = parseFileThreshold(input("file-threshold"));
   const exclude = input("exclude")
     .split("\n")
     .map((glob) => glob.trim())
     .filter(Boolean);
   const capped = pr.changed_files > MAX_LISTED_FILES;
-  const lines = capped ? pr.additions + pr.deletions : countLines(await Array.fromAsync(pages<PrFile>(`/pulls/${pr.number}/files`)), exclude);
-  const decision = decide(
-    lines,
-    thresholds,
-    pr.labels.some((label) => label.name === input("bypass-label")),
+  const listed = capped ? null : await Array.fromAsync(pages<PrFile>(`/pulls/${pr.number}/files`));
+  const lines = listed ? countLines(listed, exclude) : pr.additions + pr.deletions;
+  const files = listed ? countFiles(listed, exclude) : pr.changed_files;
+  const decision = withFileThreshold(
+    decide(
+      lines,
+      thresholds,
+      pr.labels.some((label) => label.name === input("bypass-label")),
+    ),
+    files,
+    fileThreshold,
   );
 
-  appendFileSync(process.env.GITHUB_OUTPUT!, `lines=${lines}\nlevel=${decision.level}\n`);
-  appendFileSync(process.env.GITHUB_STEP_SUMMARY!, `bite-the-diff: ${lines} lines, level ${decision.level}.\n`);
+  appendFileSync(process.env.GITHUB_OUTPUT!, `lines=${lines}\nlevel=${decision.level}\nfiles=${files}\n`);
+  appendFileSync(process.env.GITHUB_STEP_SUMMARY!, `bite-the-diff: ${size(decision)}, level ${decision.level}.\n`);
 
-  await warnOn403("comment", lines, () => updateComment(pr, decision, capped));
-  await warnOn403("check run", lines, () => updateCheckRun(pr, decision));
+  await warnOn403("comment", size(decision), () => updateComment(pr, decision, capped));
+  await warnOn403("check run", size(decision), () => updateCheckRun(pr, decision));
 
   if (decision.failsJob) {
     console.log(`::error::This PR changes ${lines} lines, past the failing threshold of ${decision.threshold}.`);
