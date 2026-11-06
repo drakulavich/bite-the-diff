@@ -85,6 +85,14 @@ jobs:
       - run: test "${{ steps.bypassed.outputs.level }}" = fail
       - run: .github/self-test-assert.sh "bite-the-diff 🟠 ${{ steps.bypassed.outputs.lines }} lines" neutral skipping "let this one through whole"
 
+      - id: tolerance
+        uses: ./
+        with:
+          exclude: dist/**
+          thresholds: ${{ steps.yellow.outputs.lines }}:fail
+      - run: test "${{ steps.tolerance.outcome }}" = success && test "${{ steps.tolerance.outputs.level }}" = comment
+      - run: .github/self-test-assert.sh "bite-the-diff 🟠 ${{ steps.tolerance.outputs.lines }} lines" neutral skipping "🟠 **${{ steps.tolerance.outputs.lines }} lines.** Almost too much elephant"
+
       - id: under
         uses: ./
         with:

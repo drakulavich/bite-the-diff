@@ -43,12 +43,14 @@ describe("countLines", () => {
 
 describe("decide, each row of the outcomes table at its boundary", () => {
   const rows = [
-    { lines: 999, level: "none", threshold: null, icon: "", conclusion: "success", name: "bite-the-diff 999 lines", red: false },
-    { lines: 1000, level: "comment", threshold: 1000, icon: "🟡", conclusion: "neutral", name: "bite-the-diff 🟡 1000 lines", red: false },
-    { lines: 2999, level: "comment", threshold: 1000, icon: "🟡", conclusion: "neutral", name: "bite-the-diff 🟡 2999 lines", red: false },
-    { lines: 3000, level: "comment", threshold: 3000, icon: "🟠", conclusion: "neutral", name: "bite-the-diff 🟠 3000 lines", red: false },
-    { lines: 4999, level: "comment", threshold: 3000, icon: "🟠", conclusion: "neutral", name: "bite-the-diff 🟠 4999 lines", red: false },
-    { lines: 5000, level: "fail", threshold: 5000, icon: "🔴", conclusion: "failure", name: "bite-the-diff 🔴 5000 lines", red: true },
+    { lines: 999, level: "none", threshold: null, icon: "", conclusion: "success", name: "bite-the-diff 999 lines", red: false, redFrom: null },
+    { lines: 1000, level: "comment", threshold: 1000, icon: "🟡", conclusion: "neutral", name: "bite-the-diff 🟡 1000 lines", red: false, redFrom: null },
+    { lines: 2999, level: "comment", threshold: 1000, icon: "🟡", conclusion: "neutral", name: "bite-the-diff 🟡 2999 lines", red: false, redFrom: null },
+    { lines: 3000, level: "comment", threshold: 3000, icon: "🟠", conclusion: "neutral", name: "bite-the-diff 🟠 3000 lines", red: false, redFrom: null },
+    { lines: 4999, level: "comment", threshold: 3000, icon: "🟠", conclusion: "neutral", name: "bite-the-diff 🟠 4999 lines", red: false, redFrom: null },
+    { lines: 5000, level: "comment", threshold: 5000, icon: "🟠", conclusion: "neutral", name: "bite-the-diff 🟠 5000 lines", red: false, redFrom: 5500 },
+    { lines: 5499, level: "comment", threshold: 5000, icon: "🟠", conclusion: "neutral", name: "bite-the-diff 🟠 5499 lines", red: false, redFrom: 5500 },
+    { lines: 5500, level: "fail", threshold: 5000, icon: "🔴", conclusion: "failure", name: "bite-the-diff 🔴 5500 lines", red: true, redFrom: null },
   ];
 
   for (const row of rows) {
@@ -62,21 +64,27 @@ describe("decide, each row of the outcomes table at its boundary", () => {
         conclusion: row.conclusion as "success",
         checkName: row.name,
         failsJob: row.red,
+        redFrom: row.redFrom,
       });
     });
   }
 
-  test("5000 lines with the bypass label is neutral and green", () => {
-    expect(decide(5000, defaults, true)).toEqual({
-      lines: 5000,
+  test("5500 lines with the bypass label is neutral and green", () => {
+    expect(decide(5500, defaults, true)).toEqual({
+      lines: 5500,
       level: "fail",
       threshold: 5000,
       icon: "🟠",
       bypassed: true,
       conclusion: "neutral",
-      checkName: "bite-the-diff 🟠 5000 lines",
+      checkName: "bite-the-diff 🟠 5500 lines",
       failsJob: false,
+      redFrom: null,
     });
+  });
+
+  test("the bypass label changes nothing inside the tolerance", () => {
+    expect(decide(5499, defaults, true)).toEqual(decide(5499, defaults, false));
   });
 
   test("the bypass label changes nothing below a fail threshold", () => {
@@ -106,6 +114,27 @@ describe("decide with custom thresholds", () => {
 
   test("a bypassed fail with no comment threshold at all is orange", () => {
     expect(decide(200, parseThresholds("100:fail"), true).checkName).toBe("bite-the-diff 🟠 200 lines");
+  });
+
+  test("a custom fail threshold has its tolerance, rounded up", () => {
+    const custom = parseThresholds("1234:fail");
+    expect(decide(1233, custom, false).level).toBe("none");
+    expect(decide(1234, custom, false).level).toBe("comment");
+    expect(decide(1357, custom, false).redFrom).toBe(1358);
+    expect(decide(1358, custom, false).failsJob).toBe(true);
+  });
+
+  test("the highest threshold reached applies while it sits in its tolerance", () => {
+    const decision = decide(1120, parseThresholds("1000:fail\n1050:fail"), false);
+    expect(decision.level).toBe("comment");
+    expect(decision.threshold).toBe(1050);
+    expect(decision.redFrom).toBe(1155);
+    expect(decision.failsJob).toBe(false);
+  });
+
+  test("a comment threshold has no tolerance", () => {
+    expect(decide(999, parseThresholds("1000:comment"), false).level).toBe("none");
+    expect(decide(1000, parseThresholds("1000:comment"), false).level).toBe("comment");
   });
 
   test("no thresholds means no level", () => {
@@ -145,14 +174,22 @@ describe("commentBody", () => {
     expect(body(3100, false)).toBe(`<!-- bite-the-diff -->\n🟠 **3100 lines.** Bigger than one bite should be (threshold: 3000).\n\n${ways(excludeOnly)}`);
   });
 
+  for (const hasLabel of [false, true]) {
+    test(`inside the tolerance, hasLabel ${hasLabel}: the label is not mentioned`, () => {
+      expect(body(5200, hasLabel)).toBe(
+        `<!-- bite-the-diff -->\n🟠 **5200 lines.** Almost too much elephant: red from 5500 (threshold: 5000).\n\n${ways(excludeOnly)}`,
+      );
+    });
+  }
+
   test("a fail threshold without the label", () => {
-    expect(body(5200, false)).toBe(
-      `<!-- bite-the-diff -->\n🔴 **5200 lines.** Too much elephant: this check stays red (threshold: 5000).\n\nCan't be cut? Add the label \`elefante\`.\n\n${ways(excludeOrLabel)}`,
+    expect(body(5600, false)).toBe(
+      `<!-- bite-the-diff -->\n🔴 **5600 lines.** Too much elephant: this check stays red (threshold: 5000).\n\nCan't be cut? Add the label \`elefante\`.\n\n${ways(excludeOrLabel)}`,
     );
   });
 
   test("a fail threshold with the label", () => {
-    expect(body(5200, true)).toBe(`<!-- bite-the-diff -->\n🐘 **5200 lines.** The \`elefante\` label let this one through whole.\n\n${ways(excludeOrLabel)}`);
+    expect(body(5600, true)).toBe(`<!-- bite-the-diff -->\n🐘 **5600 lines.** The \`elefante\` label let this one through whole.\n\n${ways(excludeOrLabel)}`);
   });
 
   test("the file cap sentence sits between the headline and the block", () => {

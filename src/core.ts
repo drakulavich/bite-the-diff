@@ -18,6 +18,7 @@ export type Decision = {
   conclusion: "success" | "neutral" | "failure";
   checkName: string;
   failsJob: boolean;
+  redFrom: number | null;
 };
 
 export function parseThresholds(text: string): Threshold[] {
@@ -50,6 +51,23 @@ export function decide(lines: number, thresholds: Threshold[], hasBypassLabel: b
       conclusion: "success",
       checkName: `${CHECK_PREFIX}${lines} lines`,
       failsJob: false,
+      redFrom: null,
+    };
+  }
+
+  // Integer arithmetic: 5000 * 1.1 is 5500.000000000001, which rounds up to 5501.
+  const redFrom = Math.ceil((reached.lines * 11) / 10);
+  if (reached.action === "fail" && lines < redFrom) {
+    return {
+      lines,
+      level: "comment",
+      threshold: reached.lines,
+      icon: "🟠",
+      bypassed: false,
+      conclusion: "neutral",
+      checkName: `${CHECK_PREFIX}🟠 ${lines} lines`,
+      failsJob: false,
+      redFrom,
     };
   }
 
@@ -67,21 +85,25 @@ export function decide(lines: number, thresholds: Threshold[], hasBypassLabel: b
     conclusion: failsJob ? "failure" : "neutral",
     checkName: `${CHECK_PREFIX}${icon} ${lines} lines`,
     failsJob,
+    redFrom: null,
   };
 }
 
 export function commentBody(decision: Decision, { bypassLabel, cappedFiles }: { bypassLabel: string; cappedFiles: number | null }): string {
-  const { lines, threshold, icon, level, bypassed } = decision;
+  const { lines, threshold, icon, level, bypassed, redFrom } = decision;
   const reachedFail = level === "fail";
   const count = `**${lines} lines.**`;
 
-  const headline = bypassed
-    ? [`🐘 ${count} The \`${bypassLabel}\` label let this one through whole.`]
-    : reachedFail
-      ? [`${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).`, "", `Can't be cut? Add the label \`${bypassLabel}\`.`]
-      : icon === "🟡"
-        ? [`${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).`]
-        : [`${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`];
+  const headline =
+    redFrom !== null
+      ? [`${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).`]
+      : bypassed
+        ? [`🐘 ${count} The \`${bypassLabel}\` label let this one through whole.`]
+        : reachedFail
+          ? [`${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).`, "", `Can't be cut? Add the label \`${bypassLabel}\`.`]
+          : icon === "🟡"
+            ? [`${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).`]
+            : [`${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`];
 
   const capped =
     cappedFiles === null

@@ -1770,7 +1770,22 @@ function decide(lines, thresholds, hasBypassLabel) {
       bypassed: false,
       conclusion: "success",
       checkName: `${CHECK_PREFIX}${lines} lines`,
-      failsJob: false
+      failsJob: false,
+      redFrom: null
+    };
+  }
+  const redFrom = Math.ceil(reached.lines * 11 / 10);
+  if (reached.action === "fail" && lines < redFrom) {
+    return {
+      lines,
+      level: "comment",
+      threshold: reached.lines,
+      icon: "\uD83D\uDFE0",
+      bypassed: false,
+      conclusion: "neutral",
+      checkName: `${CHECK_PREFIX}\uD83D\uDFE0 ${lines} lines`,
+      failsJob: false,
+      redFrom
     };
   }
   const bypassed = reached.action === "fail" && hasBypassLabel;
@@ -1785,14 +1800,15 @@ function decide(lines, thresholds, hasBypassLabel) {
     bypassed,
     conclusion: failsJob ? "failure" : "neutral",
     checkName: `${CHECK_PREFIX}${icon} ${lines} lines`,
-    failsJob
+    failsJob,
+    redFrom: null
   };
 }
 function commentBody(decision, { bypassLabel, cappedFiles }) {
-  const { lines, threshold, icon, level, bypassed } = decision;
+  const { lines, threshold, icon, level, bypassed, redFrom } = decision;
   const reachedFail = level === "fail";
   const count = `**${lines} lines.**`;
-  const headline = bypassed ? [`\uD83D\uDC18 ${count} The \`${bypassLabel}\` label let this one through whole.`] : reachedFail ? [`${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).`, "", `Can't be cut? Add the label \`${bypassLabel}\`.`] : icon === "\uD83D\uDFE1" ? [`${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).`] : [`${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`];
+  const headline = redFrom !== null ? [`${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).`] : bypassed ? [`\uD83D\uDC18 ${count} The \`${bypassLabel}\` label let this one through whole.`] : reachedFail ? [`${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).`, "", `Can't be cut? Add the label \`${bypassLabel}\`.`] : icon === "\uD83D\uDFE1" ? [`${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).`] : [`${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`];
   const capped = cappedFiles === null ? [] : [`This PR has ${cappedFiles} changed files and the API lists ${MAX_LISTED_FILES}, so the count is the PR total and \`exclude\` was not applied.`, ""];
   const leaveWhole = reachedFail ? `add the path to \`exclude\` or add the label \`${bypassLabel}\`` : "add the path to `exclude`";
   return [
