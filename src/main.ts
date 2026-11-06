@@ -1,15 +1,15 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 import {
   CHECK_PREFIX,
-  MARKER,
-  MAX_LISTED_FILES,
   commentBody,
   countLines,
+  type Decision,
   decide,
+  MARKER,
+  MAX_LISTED_FILES,
+  type PrFile,
   parseThresholds,
   underThresholdsBody,
-  type Decision,
-  type PrFile,
 } from './core.ts';
 
 type PullRequest = {
@@ -47,7 +47,7 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
   return (await res.json()) as T;
 }
 
-async function* pages<T>(path: string, items: (page: any) => T[] = (page) => page) {
+async function* pages<T>(path: string, items: (page: T[] & { check_runs: T[] }) => T[] = (page) => page) {
   for (let page = 1; ; page++) {
     const batch = items(await api('GET', `${path}?per_page=100&page=${page}`));
     yield* batch;

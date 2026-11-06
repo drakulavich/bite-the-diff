@@ -272,12 +272,19 @@ test('the token from the input is sent', async () => {
   expect(github.authorizations).toContain('Bearer secret-123');
 });
 
+type ActionInput = { default: string };
+type ActionYml = {
+  runs: unknown;
+  inputs: { thresholds: ActionInput; 'bypass-label': ActionInput; token: ActionInput; exclude: ActionInput };
+  outputs: object;
+};
+
 test('action.yml declares what the spec says', async () => {
-  const action = Bun.YAML.parse(await Bun.file('action.yml').text()) as any;
+  const action = Bun.YAML.parse(await Bun.file('action.yml').text()) as ActionYml;
   expect(action.runs).toEqual({ using: 'node24', main: 'dist/index.mjs' });
   expect(action.inputs.thresholds.default).toBe('1000:comment\n3000:comment\n5000:fail\n');
   expect(action.inputs['bypass-label'].default).toBe(LABEL);
-  expect(action.inputs.token.default).toBe('${{ github.token }}');
+  expect(action.inputs.token.default).toBe(`\${{ github.token }}`);
   expect(action.inputs.exclude.default).toBe('');
   expect(Object.keys(action.outputs)).toEqual(['lines', 'level']);
 });

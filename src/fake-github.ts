@@ -8,6 +8,8 @@ export type FileSpec = { filename: string; additions: number; deletions: number 
 const PR_NUMBER = 42;
 export const HEAD_SHA = 'aaaa1111';
 
+type WriteBody = { body: string; name: string; conclusion: string; head_sha: string };
+
 const jsonResponse = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
@@ -37,7 +39,7 @@ export class FakeGitHub {
     const route = `${req.method} ${url.pathname.replace('/repos/owner/repo', '')}`;
     this.requests.push(`${route}${url.search}`);
     this.authorizations.push(req.headers.get('authorization'));
-    const body = req.method === 'GET' ? null : ((await req.json()) as any);
+    const body = (req.method === 'GET' ? null : await req.json()) as WriteBody;
 
     if (this.failWith && route.startsWith(this.failWith.route)) return jsonResponse(this.failWith.status, { message: 'fake failure' });
     if (route.includes('/comments') && req.method !== 'GET' && this.forbid.has('comments')) return jsonResponse(403, recorded.commentForbidden);
