@@ -15,7 +15,7 @@ inputs:
     default: ""
   bypass-label:
     description: A failed threshold passes when the PR has this label
-    default: bite-the-diff/skip
+    default: elefante
   token:
     description: Needs pull-requests write and checks write
     default: ${{ github.token }}

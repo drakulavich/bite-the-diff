@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { FakeGitHub, HEAD_SHA } from "./fake-github.ts";
 
 const MARKER = "<!-- bite-the-diff -->";
-const LABEL = "bite-the-diff/skip";
+const LABEL = "elefante";
 
 let github: FakeGitHub;
 beforeEach(() => {

@@ -110,7 +110,7 @@ export class FakeGitHub {
     const inputs = {
       thresholds: "1000:comment\n3000:comment\n5000:fail\n",
       exclude: "",
-      "bypass-label": "bite-the-diff/skip",
+      "bypass-label": "elefante",
       token: "fake-token",
       ...options.inputs,
     };
