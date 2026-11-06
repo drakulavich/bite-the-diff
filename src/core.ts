@@ -72,39 +72,42 @@ export function decide(lines: number, thresholds: Threshold[], hasBypassLabel: b
 export function commentBody(decision: Decision, { bypassLabel, cappedFiles }: { bypassLabel: string; cappedFiles: number | null }): string {
   const { lines, threshold, icon, level, bypassed } = decision;
   const reachedFail = level === "fail";
+  const count = `**${lines} lines.**`;
 
-  const headline = reachedFail
-    ? `${icon} This PR changes ${lines} lines, past the failing threshold of ${threshold}${
-        bypassed ? `. The label \`${bypassLabel}\` let it pass.` : `, so this check fails. To let it pass, add the label \`${bypassLabel}\`.`
-      }`
-    : `${icon} This PR changes ${lines} lines, past the threshold of ${threshold}.`;
+  const headline = bypassed
+    ? [`🐘 ${count} The \`${bypassLabel}\` label let this one through whole.`]
+    : reachedFail
+      ? [`${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).`, "", `Can't be cut? Add the label \`${bypassLabel}\`.`]
+      : icon === "🟡"
+        ? [`${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).`]
+        : [`${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`];
 
   const capped =
     cappedFiles === null
       ? []
       : [`This PR has ${cappedFiles} changed files and the API lists ${MAX_LISTED_FILES}, so the count is the PR total and \`exclude\` was not applied.`, ""];
 
-  const leaveWhole = reachedFail ? `Exclude the path with \`exclude\` or add the label \`${bypassLabel}\`` : "Exclude the path with `exclude`";
+  const leaveWhole = reachedFail ? `add the path to \`exclude\` or add the label \`${bypassLabel}\`` : "add the path to `exclude`";
 
   return [
     MARKER,
-    headline,
+    ...headline,
     "",
     ...capped,
-    "A diff this size is hard to review. Whoever acts on this PR, agent or person, can pick one of these:",
+    "<details>",
+    "<summary>🐘 Ways to cut it into bites</summary>",
     "",
-    "| Option | How | When |",
-    "|---|---|---|",
-    "| Stack | Land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`, and rebase a child once its parent merges | The parts depend on each other in sequence |",
-    "| By file group | Separate PRs for groups of files that need different reviewers | The change cuts across areas |",
-    "| Horizontal | Shared code or stubs first, then what uses them | Layered code |",
-    "| Vertical | Smaller slices of the feature, each working end to end | Feature work |",
-    "| Refactoring apart | Refactoring in its own PR, before the behaviour change | The PR mixes the two |",
-    `| Leave it whole | ${leaveWhole} | Whole-file deletions, generated code, automated refactoring: a reviewer only checks intent |`,
+    "- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`; rebase a child once its parent merges. For parts that depend on each other in sequence.",
+    "- **By file group:** separate PRs for files that need different reviewers. For a change that cuts across areas.",
+    "- **Horizontal:** shared code or stubs first, then what uses them. For layered code.",
+    "- **Vertical:** smaller slices of the feature, each working end to end. For feature work.",
+    "- **Refactoring apart:** refactoring in its own PR, before the behaviour change. For a PR that mixes the two.",
+    `- **Leave it whole:** ${leaveWhole}. For whole-file deletions, generated code and automated refactoring, where a reviewer only checks intent.`,
+    "</details>",
     "",
   ].join("\n");
 }
 
 export function underThresholdsBody(lines: number): string {
-  return `${MARKER}\nThis PR now changes ${lines} lines, under the thresholds.\n`;
+  return `${MARKER}\n✅ **${lines} lines.** Bite-sized again.\n`;
 }

@@ -114,49 +114,60 @@ describe("decide with custom thresholds", () => {
 });
 
 describe("commentBody", () => {
-  const soft = commentBody(decide(1240, defaults, false), { bypassLabel: label, cappedFiles: null });
-  const failed = commentBody(decide(5200, defaults, false), { bypassLabel: label, cappedFiles: null });
-  const bypassed = commentBody(decide(5200, defaults, true), { bypassLabel: label, cappedFiles: null });
+  const ways = (leaveWhole: string) =>
+    [
+      "<details>",
+      "<summary>🐘 Ways to cut it into bites</summary>",
+      "",
+      "- **Stack:** land a small change and base the next PR on it: `git switch -c`, `gh pr create --base <parent branch>`; rebase a child once its parent merges. For parts that depend on each other in sequence.",
+      "- **By file group:** separate PRs for files that need different reviewers. For a change that cuts across areas.",
+      "- **Horizontal:** shared code or stubs first, then what uses them. For layered code.",
+      "- **Vertical:** smaller slices of the feature, each working end to end. For feature work.",
+      "- **Refactoring apart:** refactoring in its own PR, before the behaviour change. For a PR that mixes the two.",
+      `- **Leave it whole:** ${leaveWhole}. For whole-file deletions, generated code and automated refactoring, where a reviewer only checks intent.`,
+      "</details>",
+      "",
+    ].join("\n");
+  const excludeOnly = "add the path to `exclude`";
+  const excludeOrLabel = "add the path to `exclude` or add the label `elefante`";
+  const body = (lines: number, hasLabel: boolean, cappedFiles: number | null = null) =>
+    commentBody(decide(lines, defaults, hasLabel), { bypassLabel: label, cappedFiles });
 
-  test("starts with the hidden marker", () => {
-    expect(soft.startsWith("<!-- bite-the-diff -->\n")).toBe(true);
-  });
-
-  test("gives the icon, the count and the threshold", () => {
-    expect(soft).toContain("🟡 This PR changes 1240 lines, past the threshold of 1000.");
-  });
-
-  for (const option of ["Stack", "By file group", "Horizontal", "Vertical", "Refactoring apart", "Leave it whole"]) {
-    test(`names the option ${option}`, () => {
-      expect(soft).toContain(`| ${option} |`);
-    });
-  }
-
-  test("the stack option has the commands", () => {
-    expect(soft).toContain("`git switch -c`");
-    expect(soft).toContain("`gh pr create --base <parent branch>`");
-  });
-
-  test("the bypass label is named only once a fail threshold is reached", () => {
-    expect(soft).not.toContain(label);
-    expect(failed).toContain(
-      `🔴 This PR changes 5200 lines, past the failing threshold of 5000, so this check fails. To let it pass, add the label \`${label}\`.`,
+  test("the lowest comment threshold", () => {
+    expect(body(1501, false)).toBe(
+      `<!-- bite-the-diff -->\n🟡 **1501 lines.** That's a lot of elephant for one bite (threshold: 1000).\n\n${ways(excludeOnly)}`,
     );
-    expect(failed).toContain(`Exclude the path with \`exclude\` or add the label \`${label}\``);
   });
 
-  test("says the label let it pass", () => {
-    expect(bypassed).toContain(`🟠 This PR changes 5200 lines, past the failing threshold of 5000. The label \`${label}\` let it pass.`);
-    expect(bypassed).not.toContain("so this check fails");
+  test("a higher comment threshold", () => {
+    expect(body(3100, false)).toBe(`<!-- bite-the-diff -->\n🟠 **3100 lines.** Bigger than one bite should be (threshold: 3000).\n\n${ways(excludeOnly)}`);
   });
 
-  test("says when the count skipped exclude because of the file cap", () => {
-    const capped = commentBody(decide(5200, defaults, false), { bypassLabel: label, cappedFiles: 3500 });
-    expect(capped).toContain("This PR has 3500 changed files and the API lists 3000, so the count is the PR total and `exclude` was not applied.");
-    expect(soft).not.toContain("the API lists");
+  test("a fail threshold without the label", () => {
+    expect(body(5200, false)).toBe(
+      `<!-- bite-the-diff -->\n🔴 **5200 lines.** Too much elephant: this check stays red (threshold: 5000).\n\nCan't be cut? Add the label \`elefante\`.\n\n${ways(excludeOrLabel)}`,
+    );
+  });
+
+  test("a fail threshold with the label", () => {
+    expect(body(5200, true)).toBe(`<!-- bite-the-diff -->\n🐘 **5200 lines.** The \`elefante\` label let this one through whole.\n\n${ways(excludeOrLabel)}`);
+  });
+
+  test("the file cap sentence sits between the headline and the block", () => {
+    expect(body(3100, false, 3500)).toBe(
+      `<!-- bite-the-diff -->\n🟠 **3100 lines.** Bigger than one bite should be (threshold: 3000).\n\nThis PR has 3500 changed files and the API lists 3000, so the count is the PR total and \`exclude\` was not applied.\n\n${ways(excludeOnly)}`,
+    );
+  });
+
+  test("custom thresholds: the wording follows the icon and the action", () => {
+    const custom = parseThresholds("100:fail\n500:comment\n900:comment");
+    const text = (lines: number) => commentBody(decide(lines, custom, false), { bypassLabel: label, cappedFiles: null });
+    expect(text(200)).toContain("🔴 **200 lines.** Too much elephant: this check stays red (threshold: 100).");
+    expect(text(600)).toContain("🟡 **600 lines.** That's a lot of elephant for one bite (threshold: 500).");
+    expect(text(950)).toContain("🟠 **950 lines.** Bigger than one bite should be (threshold: 900).");
   });
 });
 
 test("underThresholdsBody keeps the marker and gives the new count", () => {
-  expect(underThresholdsBody(40)).toBe("<!-- bite-the-diff -->\nThis PR now changes 40 lines, under the thresholds.\n");
+  expect(underThresholdsBody(40)).toBe("<!-- bite-the-diff -->\n✅ **40 lines.** Bite-sized again.\n");
 });

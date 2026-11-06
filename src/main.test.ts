@@ -56,35 +56,35 @@ describe("the outcomes table at each boundary, on a PR with nothing from this ac
     {
       lines: 1000,
       level: "comment",
-      comment: "🟡 This PR changes 1000 lines, past the threshold of 1000.",
+      comment: "🟡 **1000 lines.** That's a lot of elephant for one bite (threshold: 1000).",
       check: ["bite-the-diff 🟡 1000 lines", "neutral"],
       exitCode: 0,
     },
     {
       lines: 2999,
       level: "comment",
-      comment: "🟡 This PR changes 2999 lines, past the threshold of 1000.",
+      comment: "🟡 **2999 lines.** That's a lot of elephant for one bite (threshold: 1000).",
       check: ["bite-the-diff 🟡 2999 lines", "neutral"],
       exitCode: 0,
     },
     {
       lines: 3000,
       level: "comment",
-      comment: "🟠 This PR changes 3000 lines, past the threshold of 3000.",
+      comment: "🟠 **3000 lines.** Bigger than one bite should be (threshold: 3000).",
       check: ["bite-the-diff 🟠 3000 lines", "neutral"],
       exitCode: 0,
     },
     {
       lines: 4999,
       level: "comment",
-      comment: "🟠 This PR changes 4999 lines, past the threshold of 3000.",
+      comment: "🟠 **4999 lines.** Bigger than one bite should be (threshold: 3000).",
       check: ["bite-the-diff 🟠 4999 lines", "neutral"],
       exitCode: 0,
     },
     {
       lines: 5000,
       level: "fail",
-      comment: `🔴 This PR changes 5000 lines, past the failing threshold of 5000, so this check fails. To let it pass, add the label \`${LABEL}\`.`,
+      comment: `🔴 **5000 lines.** Too much elephant: this check stays red (threshold: 5000).\n\nCan't be cut? Add the label \`${LABEL}\`.`,
       check: ["bite-the-diff 🔴 5000 lines", "failure"],
       exitCode: 1,
     },
@@ -118,7 +118,7 @@ describe("the outcomes table at each boundary, on a PR with nothing from this ac
     const result = await github.runAction({ labels: [LABEL] });
     expect(result.exitCode).toBe(0);
     expect(result.output).toBe("lines=5000\nlevel=fail\n");
-    expect(github.comments[0]!.body).toContain(`The label \`${LABEL}\` let it pass.`);
+    expect(github.comments[0]!.body).toContain(`🐘 **5000 lines.** The \`${LABEL}\` label let this one through whole.`);
     expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🟠 5000 lines", "neutral"]]);
   });
 
@@ -132,7 +132,7 @@ describe("the outcomes table at each boundary, on a PR with nothing from this ac
     github.files = sized(5000);
     const result = await github.runAction({ labels: ["big-ok"], inputs: { "bypass-label": "big-ok" } });
     expect(result.exitCode).toBe(0);
-    expect(github.comments[0]!.body).toContain("The label `big-ok` let it pass.");
+    expect(github.comments[0]!.body).toContain("The `big-ok` label let this one through whole.");
   });
 
   test("the thresholds input applies", async () => {
@@ -150,7 +150,7 @@ describe("dropping under the thresholds", () => {
     github.files = sized(40);
     const result = await github.runAction();
     expect(result.exitCode).toBe(0);
-    expect(github.comments.map((c) => c.body)).toEqual([`${MARKER}\nThis PR now changes 40 lines, under the thresholds.\n`]);
+    expect(github.comments.map((c) => c.body)).toEqual([`${MARKER}\n✅ **40 lines.** Bite-sized again.\n`]);
     expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 40 lines", "success"]]);
   });
 
@@ -170,7 +170,7 @@ describe("at most one comment", () => {
     github.files = sized(1240);
     await github.runAction();
     expect(github.comments).toHaveLength(131);
-    expect(github.comments.at(-1)!.body).toContain("This PR changes 1240 lines");
+    expect(github.comments.at(-1)!.body).toContain("🟡 **1240 lines.**");
     expect(github.comments[0]!.body).toBe("chat 0");
     expect(github.requests).toContain("GET /issues/42/comments?per_page=100&page=2");
     expect(posts()).toEqual(["POST /check-runs"]);
@@ -182,7 +182,7 @@ describe("at most one comment", () => {
     github.files = sized(3100);
     await github.runAction();
     expect(github.comments).toHaveLength(1);
-    expect(github.comments[0]!.body).toContain("🟠 This PR changes 3100 lines, past the threshold of 3000.");
+    expect(github.comments[0]!.body).toContain("🟠 **3100 lines.** Bigger than one bite should be (threshold: 3000).");
     expect(github.comments[0]!.body.startsWith(MARKER)).toBe(true);
   });
 });
