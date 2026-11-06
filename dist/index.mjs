@@ -1791,10 +1791,7 @@ function commentBody(decision, { bypassLabel, cappedFiles }) {
   const { lines, threshold, icon, level, bypassed } = decision;
   const reachedFail = level === "fail";
   const headline = reachedFail ? `${icon} This PR changes ${lines} lines, past the failing threshold of ${threshold}${bypassed ? `. The label \`${bypassLabel}\` let it pass.` : `, so this check fails. To let it pass, add the label \`${bypassLabel}\`.`}` : `${icon} This PR changes ${lines} lines, past the threshold of ${threshold}.`;
-  const capped = cappedFiles === null ? [] : [
-    `This PR has ${cappedFiles} changed files and the API lists ${MAX_LISTED_FILES}, so the count is the PR total and \`exclude\` was not applied.`,
-    ""
-  ];
+  const capped = cappedFiles === null ? [] : [`This PR has ${cappedFiles} changed files and the API lists ${MAX_LISTED_FILES}, so the count is the PR total and \`exclude\` was not applied.`, ""];
   const leaveWhole = reachedFail ? `Exclude the path with \`exclude\` or add the label \`${bypassLabel}\`` : "Exclude the path with `exclude`";
   return [
     MARKER,

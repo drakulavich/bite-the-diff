@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from "node:fs";
 import {
   CHECK_PREFIX,
   commentBody,
@@ -10,7 +10,7 @@ import {
   type PrFile,
   parseThresholds,
   underThresholdsBody,
-} from './core.ts';
+} from "./core.ts";
 
 type PullRequest = {
   number: number;
@@ -30,16 +30,16 @@ class ApiError extends Error {
   }
 }
 
-const input = (name: string) => (process.env[`INPUT_${name.toUpperCase()}`] ?? '').trim();
+const input = (name: string) => (process.env[`INPUT_${name.toUpperCase()}`] ?? "").trim();
 const repoUrl = `${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}`;
 
 async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${repoUrl}${path}`, {
     method,
     headers: {
-      authorization: `Bearer ${input('token')}`,
-      accept: 'application/vnd.github+json',
-      'x-github-api-version': '2022-11-28',
+      authorization: `Bearer ${input("token")}`,
+      accept: "application/vnd.github+json",
+      "x-github-api-version": "2022-11-28",
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -49,7 +49,7 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
 
 async function* pages<T>(path: string, items: (page: T[] & { check_runs: T[] }) => T[] = (page) => page) {
   for (let page = 1; ; page++) {
-    const batch = items(await api('GET', `${path}?per_page=100&page=${page}`));
+    const batch = items(await api("GET", `${path}?per_page=100&page=${page}`));
     yield* batch;
     if (batch.length < 100) return;
   }
@@ -61,19 +61,16 @@ async function findFirst<T>(all: AsyncIterable<T>, wanted: (item: T) => boolean)
 }
 
 async function updateComment(pr: PullRequest, decision: Decision, capped: boolean) {
-  const existing = await findFirst(
-    pages<{ id: number; body: string }>(`/issues/${pr.number}/comments`),
-    (comment) => comment.body.includes(MARKER),
-  );
+  const existing = await findFirst(pages<{ id: number; body: string }>(`/issues/${pr.number}/comments`), (comment) => comment.body.includes(MARKER));
   const body =
-    decision.level === 'none'
+    decision.level === "none"
       ? underThresholdsBody(decision.lines)
       : commentBody(decision, {
-          bypassLabel: input('bypass-label'),
+          bypassLabel: input("bypass-label"),
           cappedFiles: capped ? pr.changed_files : null,
         });
-  if (existing) await api('PATCH', `/issues/comments/${existing.id}`, { body });
-  else if (decision.level !== 'none') await api('POST', `/issues/${pr.number}/comments`, { body });
+  if (existing) await api("PATCH", `/issues/comments/${existing.id}`, { body });
+  else if (decision.level !== "none") await api("POST", `/issues/${pr.number}/comments`, { body });
 }
 
 async function updateCheckRun(pr: PullRequest, decision: Decision) {
@@ -83,12 +80,12 @@ async function updateCheckRun(pr: PullRequest, decision: Decision) {
   );
   const fields = {
     name: decision.checkName,
-    status: 'completed',
+    status: "completed",
     conclusion: decision.conclusion,
-    output: { title: `${decision.lines} lines`, summary: `Threshold reached: ${decision.threshold ?? 'none'}.` },
+    output: { title: `${decision.lines} lines`, summary: `Threshold reached: ${decision.threshold ?? "none"}.` },
   };
-  if (existing) await api('PATCH', `/check-runs/${existing.id}`, fields);
-  else if (decision.level !== 'none') await api('POST', '/check-runs', { ...fields, head_sha: pr.head.sha });
+  if (existing) await api("PATCH", `/check-runs/${existing.id}`, fields);
+  else if (decision.level !== "none") await api("POST", "/check-runs", { ...fields, head_sha: pr.head.sha });
 }
 
 async function warnOn403(what: string, lines: number, write: () => Promise<void>) {
@@ -101,23 +98,28 @@ async function warnOn403(what: string, lines: number, write: () => Promise<void>
 }
 
 async function run() {
-  const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH!, 'utf8'));
+  const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH!, "utf8"));
   const pr: PullRequest | undefined = event.pull_request;
-  if (!pr) throw new Error('bite-the-diff runs on pull_request events');
+  if (!pr) throw new Error("bite-the-diff runs on pull_request events");
 
-  const thresholds = parseThresholds(input('thresholds'));
-  const exclude = input('exclude').split('\n').map((glob) => glob.trim()).filter(Boolean);
+  const thresholds = parseThresholds(input("thresholds"));
+  const exclude = input("exclude")
+    .split("\n")
+    .map((glob) => glob.trim())
+    .filter(Boolean);
   const capped = pr.changed_files > MAX_LISTED_FILES;
-  const lines = capped
-    ? pr.additions + pr.deletions
-    : countLines(await Array.fromAsync(pages<PrFile>(`/pulls/${pr.number}/files`)), exclude);
-  const decision = decide(lines, thresholds, pr.labels.some((label) => label.name === input('bypass-label')));
+  const lines = capped ? pr.additions + pr.deletions : countLines(await Array.fromAsync(pages<PrFile>(`/pulls/${pr.number}/files`)), exclude);
+  const decision = decide(
+    lines,
+    thresholds,
+    pr.labels.some((label) => label.name === input("bypass-label")),
+  );
 
   appendFileSync(process.env.GITHUB_OUTPUT!, `lines=${lines}\nlevel=${decision.level}\n`);
   appendFileSync(process.env.GITHUB_STEP_SUMMARY!, `bite-the-diff: ${lines} lines, level ${decision.level}.\n`);
 
-  await warnOn403('comment', lines, () => updateComment(pr, decision, capped));
-  await warnOn403('check run', lines, () => updateCheckRun(pr, decision));
+  await warnOn403("comment", lines, () => updateComment(pr, decision, capped));
+  await warnOn403("check run", lines, () => updateCheckRun(pr, decision));
 
   if (decision.failsJob) {
     console.log(`::error::This PR changes ${lines} lines, past the failing threshold of ${decision.threshold}.`);
