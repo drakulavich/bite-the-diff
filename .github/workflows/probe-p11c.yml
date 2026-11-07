@@ -1,0 +1,17 @@
+name: probe-p11c
+on:
+  pull_request:
+jobs:
+  work:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: a
+        uses: ./
+        with:
+          thresholds: 1000000:comment
+          exclude: .github/**
+      - run: echo second step ran
