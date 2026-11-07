@@ -1,0 +1,18 @@
+name: probe-p11b
+on:
+  pull_request:
+jobs:
+  work:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: a
+        uses: ./
+        continue-on-error: true
+        with:
+          thresholds: 1:fail
+          exclude: .github/**
+      - run: echo second step ran
