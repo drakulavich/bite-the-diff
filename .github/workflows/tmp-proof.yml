@@ -1,0 +1,17 @@
+name: tmp-proof
+on: pull_request
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: size
+        uses: ./
+        with:
+          exclude: .github/**
+          thresholds: 1:comment
+      - run: echo "lines=${{ steps.size.outputs.lines }} level=${{ steps.size.outputs.level }} files=${{ steps.size.outputs.files }}"
