@@ -9,11 +9,11 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v7.0.1
+      - uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version-file: .bun-version
-      - uses: actions/cache@v6
+      - uses: actions/cache@v6.1.0
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -23,8 +23,8 @@ jobs:
   dist:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v7.0.1
+      - uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
@@ -46,7 +46,7 @@ jobs:
       PR: ${{ github.event.pull_request.number }}
       SHA: ${{ github.event.pull_request.head.sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - id: yellow
         uses: ./
@@ -129,7 +129,7 @@ jobs:
       pull-requests: read
       checks: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - id: soft
         uses: ./
         with:
