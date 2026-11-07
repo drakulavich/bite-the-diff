@@ -33,6 +33,17 @@ describe("the count", () => {
     expect(result.exitCode).toBe(0);
   });
 
+  test("lock files are left out of both counts with no exclude input", async () => {
+    github.files = [
+      { filename: "pnpm-lock.yaml", additions: 6000, deletions: 0 },
+      { filename: "apps/web/yarn.lock", additions: 9000, deletions: 100 },
+      { filename: "src/a.ts", additions: 40, deletions: 2 },
+    ];
+    const result = await github.runAction();
+    expect(result.output).toBe("lines=42\nlevel=none\nfiles=1\n");
+    expect(github.comments).toEqual([]);
+  });
+
   test("over 3000 files, the count is the PR totals, without exclude, and the comment says so", async () => {
     const result = await github.runAction({
       prFields: { changed_files: 3001, additions: 4400, deletions: 1200 },

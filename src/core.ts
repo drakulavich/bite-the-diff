@@ -3,6 +3,23 @@ import picomatch from "picomatch";
 export const MARKER = "<!-- bite-the-diff -->";
 export const CHECK_PREFIX = "bite-the-diff ";
 export const MAX_LISTED_FILES = 3000;
+const LOCK_FILES = [
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "bun.lock",
+  "bun.lockb",
+  "Cargo.lock",
+  "go.sum",
+  "poetry.lock",
+  "uv.lock",
+  "Pipfile.lock",
+  "composer.lock",
+  "Gemfile.lock",
+  "gradle.lockfile",
+  "buildscript-gradle.lockfile",
+].map((name) => `**/${name}`);
 const FOOTER = "<sub>🐘 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>";
 
 export type PrFile = { filename: string; additions: number; deletions: number };
@@ -40,7 +57,7 @@ export function parseThresholds(text: string): Threshold[] {
 }
 
 function included(files: PrFile[], exclude: string[]): PrFile[] {
-  const excluded = exclude.length ? picomatch(exclude, { dot: true }) : () => false;
+  const excluded = picomatch([...LOCK_FILES, ...exclude], { dot: true });
   return files.filter((file) => !excluded(file.filename));
 }
 

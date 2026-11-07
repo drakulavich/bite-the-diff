@@ -1745,6 +1745,23 @@ var import_picomatch = __toESM(require_picomatch2(), 1);
 var MARKER = "<!-- bite-the-diff -->";
 var CHECK_PREFIX = "bite-the-diff ";
 var MAX_LISTED_FILES = 3000;
+var LOCK_FILES = [
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "bun.lock",
+  "bun.lockb",
+  "Cargo.lock",
+  "go.sum",
+  "poetry.lock",
+  "uv.lock",
+  "Pipfile.lock",
+  "composer.lock",
+  "Gemfile.lock",
+  "gradle.lockfile",
+  "buildscript-gradle.lockfile"
+].map((name) => `**/${name}`);
 var FOOTER = "<sub>\uD83D\uDC18 [bite-the-diff](https://github.com/drakulavich/bite-the-diff)</sub>";
 function plural(count, word) {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
@@ -1759,7 +1776,7 @@ function parseThresholds(text) {
   });
 }
 function included(files, exclude) {
-  const excluded = exclude.length ? import_picomatch.default(exclude, { dot: true }) : () => false;
+  const excluded = import_picomatch.default([...LOCK_FILES, ...exclude], { dot: true });
   return files.filter((file) => !excluded(file.filename));
 }
 function parseFileThreshold(text) {
