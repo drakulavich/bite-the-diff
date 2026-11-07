@@ -125,7 +125,7 @@ async function updateCheckRun(pr: PullRequest, decision: Decision) {
       summary: `Threshold reached: ${decision.threshold ?? "none"}.${decision.filesOver ? ` File threshold reached: ${decision.filesOver.threshold}.` : ""}`,
     },
   };
-  for (const run of existing) await api("PATCH", `/check-runs/${run.id}`, fields);
+  for (const run of existing.slice(0, 1)) await api("PATCH", `/check-runs/${run.id}`, fields);
   if (existing.length === 0 && decision.level !== "none") await api("POST", "/check-runs", { ...fields, head_sha: pr.head.sha });
 }
 

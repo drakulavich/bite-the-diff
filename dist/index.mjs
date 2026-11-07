@@ -32,7 +32,7 @@ var __toESM = (mod, isNodeMode, target) => {
 };
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 
-// node_modules/picomatch/lib/constants.js
+// ../v1.1/node_modules/picomatch/lib/constants.js
 var require_constants = __commonJS(function(exports, module) {
   var WIN_SLASH = "\\\\/";
   var WIN_NO_SLASH = `[^${WIN_SLASH}]`;
@@ -177,7 +177,7 @@ var require_constants = __commonJS(function(exports, module) {
   };
 });
 
-// node_modules/picomatch/lib/utils.js
+// ../v1.1/node_modules/picomatch/lib/utils.js
 var require_utils = __commonJS(function(exports) {
   var {
     REGEX_BACKSLASH,
@@ -240,7 +240,7 @@ var require_utils = __commonJS(function(exports) {
   };
 });
 
-// node_modules/picomatch/lib/scan.js
+// ../v1.1/node_modules/picomatch/lib/scan.js
 var require_scan = __commonJS(function(exports, module) {
   var utils = require_utils();
   var {
@@ -563,7 +563,7 @@ var require_scan = __commonJS(function(exports, module) {
   module.exports = scan;
 });
 
-// node_modules/picomatch/lib/parse.js
+// ../v1.1/node_modules/picomatch/lib/parse.js
 var require_parse = __commonJS(function(exports, module) {
   var constants = require_constants();
   var utils = require_utils();
@@ -1583,7 +1583,7 @@ var require_parse = __commonJS(function(exports, module) {
   module.exports = parse;
 });
 
-// node_modules/picomatch/lib/picomatch.js
+// ../v1.1/node_modules/picomatch/lib/picomatch.js
 var require_picomatch = __commonJS(function(exports, module) {
   var scan = require_scan();
   var parse = require_parse();
@@ -1723,7 +1723,7 @@ var require_picomatch = __commonJS(function(exports, module) {
   module.exports = picomatch;
 });
 
-// node_modules/picomatch/index.js
+// ../v1.1/node_modules/picomatch/index.js
 var require_picomatch2 = __commonJS(function(exports, module) {
   var pico = require_picomatch();
   var utils = require_utils();
@@ -1974,7 +1974,7 @@ async function updateCheckRun(pr, decision) {
       summary: `Threshold reached: ${decision.threshold ?? "none"}.${decision.filesOver ? ` File threshold reached: ${decision.filesOver.threshold}.` : ""}`
     }
   };
-  for (const run of existing)
+  for (const run of existing.slice(0, 1))
     await api("PATCH", `/check-runs/${run.id}`, fields);
   if (existing.length === 0 && decision.level !== "none")
     await api("POST", "/check-runs", { ...fields, head_sha: pr.head.sha });
