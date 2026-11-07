@@ -113,11 +113,9 @@ async function updateComment(pr: PullRequest, decision: Decision, capped: boolea
 }
 
 async function updateCheckRun(pr: PullRequest, decision: Decision) {
-  const existing = await findFirst(
-    // Without filter=all a re-run misses the check run of the attempt before, and GitHub restores that one when the re-run ends.
-    pages<{ id: number; name: string }>(`/commits/${pr.head.sha}/check-runs`, (page) => page.check_runs, "&filter=all"),
-    (run) => run.name.startsWith(CHECK_PREFIX),
-  );
+  // Without filter=all a re-run misses the check runs of earlier attempts, and GitHub restores one, red if it was red, when the re-run ends.
+  const listed = await Array.fromAsync(pages<{ id: number; name: string }>(`/commits/${pr.head.sha}/check-runs`, (page) => page.check_runs, "&filter=all"));
+  const existing = listed.filter((run) => run.name.startsWith(CHECK_PREFIX));
   const fields = {
     name: decision.checkName,
     status: "completed",
@@ -127,8 +125,8 @@ async function updateCheckRun(pr: PullRequest, decision: Decision) {
       summary: `Threshold reached: ${decision.threshold ?? "none"}.${decision.filesOver ? ` File threshold reached: ${decision.filesOver.threshold}.` : ""}`,
     },
   };
-  if (existing) await api("PATCH", `/check-runs/${existing.id}`, fields);
-  else if (decision.level !== "none") await api("POST", "/check-runs", { ...fields, head_sha: pr.head.sha });
+  for (const run of existing) await api("PATCH", `/check-runs/${run.id}`, fields);
+  if (existing.length === 0 && decision.level !== "none") await api("POST", "/check-runs", { ...fields, head_sha: pr.head.sha });
 }
 
 const report = (line: string) => appendFileSync(process.env.GITHUB_STEP_SUMMARY!, `${line}\n`);

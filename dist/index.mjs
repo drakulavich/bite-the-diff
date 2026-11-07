@@ -1963,7 +1963,8 @@ async function updateComment(pr, decision, capped) {
     await api("POST", `/issues/${pr.number}/comments`, { body });
 }
 async function updateCheckRun(pr, decision) {
-  const existing = await findFirst(pages(`/commits/${pr.head.sha}/check-runs`, (page) => page.check_runs, "&filter=all"), (run) => run.name.startsWith(CHECK_PREFIX));
+  const listed = await Array.fromAsync(pages(`/commits/${pr.head.sha}/check-runs`, (page) => page.check_runs, "&filter=all"));
+  const existing = listed.filter((run) => run.name.startsWith(CHECK_PREFIX));
   const fields = {
     name: decision.checkName,
     status: "completed",
@@ -1973,9 +1974,9 @@ async function updateCheckRun(pr, decision) {
       summary: `Threshold reached: ${decision.threshold ?? "none"}.${decision.filesOver ? ` File threshold reached: ${decision.filesOver.threshold}.` : ""}`
     }
   };
-  if (existing)
-    await api("PATCH", `/check-runs/${existing.id}`, fields);
-  else if (decision.level !== "none")
+  for (const run of existing)
+    await api("PATCH", `/check-runs/${run.id}`, fields);
+  if (existing.length === 0 && decision.level !== "none")
     await api("POST", "/check-runs", { ...fields, head_sha: pr.head.sha });
 }
 var report = (line) => appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}

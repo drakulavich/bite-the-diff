@@ -468,6 +468,34 @@ describe("a re-run: the event keeps what it held at the first attempt, the API h
     expect(github.checkRuns).toEqual([{ id: 7, name: "bite-the-diff 🟠 5600 lines", conclusion: "neutral", head_sha: HEAD_SHA }]);
   });
 
+  test("older attempts with other names: every one gets the neutral conclusion, and none is added", async () => {
+    github.checkRuns = [
+      { id: 2, name: "bite-the-diff 🟡 10 lines", conclusion: "neutral", head_sha: HEAD_SHA },
+      { id: 7, name: "bite-the-diff 🔴 5600 lines", conclusion: "failure", head_sha: HEAD_SHA },
+    ];
+    github.earlierAttempt.add(2);
+    github.earlierAttempt.add(7);
+    github.files = sized(5600);
+    const result = await github.runAction({ labels: [LABEL] });
+    expect(result.exitCode).toBe(0);
+    expect(patches()).toEqual(["PATCH /check-runs/2", "PATCH /check-runs/7"]);
+    expect(posts().filter((r) => r === "POST /check-runs")).toEqual([]);
+    expect(github.checkRuns).toEqual([
+      { id: 2, name: "bite-the-diff 🟠 5600 lines", conclusion: "neutral", head_sha: HEAD_SHA },
+      { id: 7, name: "bite-the-diff 🟠 5600 lines", conclusion: "neutral", head_sha: HEAD_SHA },
+    ]);
+  });
+
+  test("a check run past the first page is updated too", async () => {
+    github.checkRuns = Array.from({ length: 120 }, (_, i) => ({ id: i + 1, name: `job ${i}`, conclusion: "success", head_sha: HEAD_SHA }));
+    github.checkRuns[0] = { id: 1, name: "bite-the-diff 🟡 10 lines", conclusion: "neutral", head_sha: HEAD_SHA };
+    github.checkRuns.push({ id: 900, name: "bite-the-diff 🔴 5600 lines", conclusion: "failure", head_sha: HEAD_SHA });
+    github.files = sized(5600);
+    await github.runAction({ labels: [LABEL] });
+    expect(patches()).toEqual(["PATCH /check-runs/1", "PATCH /check-runs/900"]);
+    expect(github.checkRuns.at(-1)!.conclusion).toBe("neutral");
+  });
+
   test("a commit pushed since: the check run lands on the live head", async () => {
     github.files = sized(1240);
     await github.runAction({ eventPr: { head: { sha: "0ld5ha" } }, prFields: { head: { sha: "live5ha" } } });
