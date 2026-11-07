@@ -1,0 +1,43 @@
+name: probe-p7
+on:
+  pull_request:
+    types: [opened]
+jobs:
+  bad-token:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: a
+        uses: ./
+        with:
+          thresholds: 1:comment
+          exclude: .github/**
+          token: not-a-token
+      - run: echo "DUMP lines=${{ steps.a.outputs.lines }} level=${{ steps.a.outputs.level }}"
+  perms-empty:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: a
+        uses: ./
+        with:
+          thresholds: 1:comment
+          exclude: .github/**
+      - run: echo "DUMP lines=${{ steps.a.outputs.lines }} level=${{ steps.a.outputs.level }}"
+  perms-read-only:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: a
+        uses: ./
+        with:
+          thresholds: 1:comment
+          exclude: .github/**
+      - run: echo "DUMP lines=${{ steps.a.outputs.lines }} level=${{ steps.a.outputs.level }}"
