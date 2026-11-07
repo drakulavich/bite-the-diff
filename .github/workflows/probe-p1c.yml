@@ -1,0 +1,24 @@
+name: probe-p1c
+on:
+  pull_request:
+    types: [opened, labeled]
+concurrency:
+  group: probe-p1c-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: dump
+        env:
+          ACTION: ${{ github.event.action }}
+          CHANGES: ${{ toJSON(github.event.changes) }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          echo "DUMP action=$ACTION attempt=$ATTEMPT head=$HEAD_SHA github_sha=$GITHUB_SHA"
+          echo "DUMP changes=$(echo "$CHANGES" | jq -c .)"
+          jq -c '{DUMP:"event", label:.label.name, labels:[.pull_request.labels[].name], changed_files:.pull_request.changed_files, additions:.pull_request.additions, deletions:.pull_request.deletions, base:.pull_request.base.ref, title:.pull_request.title}' "$GITHUB_EVENT_PATH"
+      - run: sleep 15
