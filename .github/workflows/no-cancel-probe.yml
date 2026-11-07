@@ -16,4 +16,4 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: ./
         with:
-          thresholds: 1:comment
+          thresholds: 1000000:comment
