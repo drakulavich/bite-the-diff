@@ -113,14 +113,17 @@ jobs:
       - run: |
           .github/self-test-assert.sh "bite-the-diff 🟡 ${{ steps.files-and-lines.outputs.lines }} lines, ${{ steps.files-and-lines.outputs.files }} files" neutral skipping "Also ${{ steps.files-and-lines.outputs.files }} files (threshold: 1)."
 
-      - run: gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" -f 'labels[]=wontfix'
+      - id: had-label
+        run: echo "had=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels?per_page=100" --jq 'any(.[]; .name == "wontfix")')" >> "$GITHUB_OUTPUT"
+      - if: steps.had-label.outputs.had == 'false'
+        run: gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" -f 'labels[]=wontfix'
       - id: bypassed
         uses: ./
         with:
           exclude: dist/**
           thresholds: 1:fail
           bypass-label: wontfix
-      - if: always()
+      - if: always() && steps.had-label.outputs.had == 'false'
         run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/$PR/labels/wontfix"
       - run: test "${{ steps.bypassed.outputs.level }}" = fail
       - run: .github/self-test-assert.sh "bite-the-diff 🟠 ${{ steps.bypassed.outputs.lines }} lines" neutral skipping "let this one through whole"
