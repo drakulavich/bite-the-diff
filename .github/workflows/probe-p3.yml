@@ -1,0 +1,30 @@
+name: probe-p3
+on:
+  pull_request:
+    types: [opened]
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: dump
+        env:
+          ACTION: ${{ github.event.action }}
+          CHANGES: ${{ toJSON(github.event.changes) }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          echo "DUMP action=$ACTION attempt=$ATTEMPT head=$HEAD_SHA github_sha=$GITHUB_SHA"
+          echo "DUMP changes=$(echo "$CHANGES" | jq -c .)"
+          jq -c '{DUMP:"event", label:.label.name, labels:[.pull_request.labels[].name], changed_files:.pull_request.changed_files, additions:.pull_request.additions, deletions:.pull_request.deletions, base:.pull_request.base.ref, title:.pull_request.title}' "$GITHUB_EVENT_PATH"
+      - uses: actions/checkout@v7.0.1
+      - id: a
+        uses: ./
+        with:
+          thresholds: 1:comment
+          exclude: |
+            .github/**
+      - run: echo "DUMP lines=${{ steps.a.outputs.lines }} files=${{ steps.a.outputs.files }} level=${{ steps.a.outputs.level }}"
