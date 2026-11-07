@@ -33,7 +33,7 @@ describe("the count", () => {
     expect(result.exitCode).toBe(0);
   });
 
-  test("over 3000 files, the count is the event totals, without exclude, and the comment says so", async () => {
+  test("over 3000 files, the count is the PR totals, without exclude, and the comment says so", async () => {
     const result = await github.runAction({
       prFields: { changed_files: 3001, additions: 4400, deletions: 1200 },
       inputs: { exclude: "**" },
@@ -203,6 +203,7 @@ describe("dropping under the thresholds", () => {
     const result = await github.runAction();
     expect(result.exitCode).toBe(0);
     expect(github.requests).toEqual([
+      "GET /pulls/42",
       "GET /pulls/42/files?per_page=100&page=1",
       "GET /issues/42/comments?per_page=100&page=1",
       `GET /commits/${HEAD_SHA}/check-runs?per_page=100&page=1`,
@@ -398,7 +399,7 @@ describe("at most one check run per commit", () => {
     expect(github.checkRuns).toEqual([{ id, name: "bite-the-diff 🔴 5600 lines", conclusion: "failure", head_sha: HEAD_SHA }]);
   });
 
-  test("uses the head sha of the event, not GITHUB_SHA", async () => {
+  test("uses the head sha of the PR, not GITHUB_SHA", async () => {
     github.files = sized(1240);
     await github.runAction();
     expect(github.requests).toContain(`GET /commits/${HEAD_SHA}/check-runs?per_page=100&page=1`);
@@ -422,6 +423,45 @@ describe("at most one check run per commit", () => {
     await github.runAction();
     expect(github.checkRuns).toHaveLength(121);
     expect(github.checkRuns.at(-1)!.name).toBe("bite-the-diff 🟠 3100 lines");
+  });
+});
+
+describe("a re-run: the event keeps what it held at the first attempt, the API has the live PR", () => {
+  test("a label added since: the bypass applies", async () => {
+    github.files = sized(5600);
+    const result = await github.runAction({ eventPr: { labels: [] }, labels: [LABEL] });
+    expect(result.exitCode).toBe(0);
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🟠 5600 lines", "neutral"]]);
+    expect(github.comments[0]!.body).toContain(`🐘 **5600 lines.** The \`${LABEL}\` label let this one through whole.`);
+  });
+
+  test("a label removed since: the bypass is gone", async () => {
+    github.files = sized(5600);
+    const result = await github.runAction({ eventPr: { labels: [{ name: LABEL }] }, labels: [] });
+    expect(result.exitCode).toBe(1);
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
+  });
+
+  test("a commit pushed since: the check run lands on the live head", async () => {
+    github.files = sized(1240);
+    await github.runAction({ eventPr: { head: { sha: "0ld5ha" } }, prFields: { head: { sha: "live5ha" } } });
+    expect(github.requests).toContain("GET /commits/live5ha/check-runs?per_page=100&page=1");
+    expect(github.checkRuns[0]!.head_sha).toBe("live5ha");
+  });
+
+  test("the PR grew past the listing cap since: the live changed_files and totals decide", async () => {
+    const result = await github.runAction({
+      eventPr: { changed_files: 3, additions: 2, deletions: 1 },
+      prFields: { changed_files: 3001, additions: 4400, deletions: 1200 },
+    });
+    expect(result.output).toBe("lines=5600\nlevel=fail\nfiles=3001\n");
+    expect(github.requests.some((r) => r.includes("/files"))).toBe(false);
+  });
+
+  test("the PR shrank under the listing cap since: its files are listed", async () => {
+    github.files = sized(40);
+    const result = await github.runAction({ eventPr: { changed_files: 3001, additions: 4400, deletions: 1200 } });
+    expect(result.output).toBe("lines=40\nlevel=none\nfiles=1\n");
   });
 });
 
@@ -465,7 +505,7 @@ describe("API failures", () => {
   });
 
   test("a 403 on listing the files fails the run", async () => {
-    github.failWith = { route: "GET /pulls", status: 403 };
+    github.failWith = { route: "GET /pulls/42/files", status: 403 };
     const result = await github.runAction();
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("::error::GitHub API GET /pulls/42/files?per_page=100&page=1: 403");
@@ -615,7 +655,7 @@ describe("file-threshold", () => {
     }
   });
 
-  test("over the listing cap, only files reached: the event's changed_files, and the comment says so", async () => {
+  test("over the listing cap, only files reached: the PR's changed_files, and the comment says so", async () => {
     const result = await github.runAction({ prFields: { changed_files: 3001, additions: 30, deletions: 10 }, inputs: { exclude: "**" } });
     expect(result.output).toBe("lines=40\nlevel=comment\nfiles=3001\n");
     expect(github.requests.some((r) => r.includes("/files"))).toBe(false);

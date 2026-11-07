@@ -1950,13 +1950,13 @@ async function warnOn403(what, changed, write) {
 }
 async function run() {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
-  const pr = event.pull_request;
-  if (!pr)
+  if (!event.pull_request)
     throw new Error("bite-the-diff runs on pull_request events");
   const thresholds = parseThresholds(input("thresholds"));
   const fileThreshold = parseFileThreshold(input("file-threshold"));
   const exclude = input("exclude").split(`
 `).map((glob) => glob.trim()).filter(Boolean);
+  const pr = await api("GET", `/pulls/${event.pull_request.number}`);
   const capped = pr.changed_files > MAX_LISTED_FILES;
   const listed = capped ? null : await Array.fromAsync(pages(`/pulls/${pr.number}/files`));
   const lines = listed ? countLines(listed, exclude) : pr.additions + pr.deletions;

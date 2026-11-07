@@ -30,6 +30,7 @@ export class FakeGitHub {
   deletedElsewhere = new Set<number>();
   failWith: { route: string; status: number } | null = null;
   private nextId = 1000;
+  private pull: { head: { sha: string } } & Record<string, unknown> = recorded.pull;
   private server = Bun.serve({ port: 0, fetch: (req) => this.handle(req) });
 
   stop() {
@@ -48,6 +49,7 @@ export class FakeGitHub {
       return jsonResponse(403, req.method === "DELETE" ? recorded.deleteForbidden : recorded.commentForbidden);
     if (route.includes("/check-runs") && req.method !== "GET" && this.forbid.has("check-runs")) return jsonResponse(403, recorded.checkForbidden);
 
+    if (route === `GET /pulls/${PR_NUMBER}`) return jsonResponse(200, this.pull);
     if (route === `GET /pulls/${PR_NUMBER}/files`) {
       const items = page(this.files, url).map((file) => ({ ...recorded.files[0], ...file, changes: file.additions + file.deletions }));
       return jsonResponse(200, items);
@@ -76,7 +78,7 @@ export class FakeGitHub {
       this.comments = this.comments.filter((c) => c.id !== id);
       return new Response(null, { status: recorded.deleteComment.status });
     }
-    if (route === `GET /commits/${HEAD_SHA}/check-runs`) {
+    if (route === `GET /commits/${this.pull.head.sha}/check-runs`) {
       const runs = page(this.checkRuns, url).map((run) => ({ ...recorded.checkRun, ...run }));
       return jsonResponse(200, { total_count: this.checkRuns.length, check_runs: runs });
     }
@@ -103,19 +105,21 @@ export class FakeGitHub {
       labels?: string[];
       inputs?: Record<string, string>;
       eventFile?: unknown;
+      eventPr?: Record<string, unknown>;
     } = {},
   ) {
     const dir = mkdtempSync(join(tmpdir(), "bite-the-diff-"));
     const paths = { event: join(dir, "event.json"), output: join(dir, "output"), summary: join(dir, "summary") };
     const labels = options.labels ?? [];
-    const pullRequest = {
-      ...recorded.event.pull_request,
+    this.pull = {
+      ...recorded.pull,
       number: PR_NUMBER,
-      head: { ...recorded.event.pull_request.head, sha: HEAD_SHA },
+      head: { ...recorded.pull.head, sha: HEAD_SHA },
       changed_files: this.files.length,
-      labels: labels.map((name) => ({ ...recorded.event.pull_request.labels[0], name })),
+      labels: labels.map((name) => ({ ...recorded.pull.labels[0], name })),
       ...options.prFields,
     };
+    const pullRequest = { ...recorded.event.pull_request, number: PR_NUMBER, ...options.eventPr };
     writeFileSync(paths.event, JSON.stringify(options.eventFile ?? { ...recorded.event, pull_request: pullRequest }));
     writeFileSync(paths.output, "");
     writeFileSync(paths.summary, "");

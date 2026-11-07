@@ -113,11 +113,15 @@ jobs:
       - run: |
           .github/self-test-assert.sh "bite-the-diff 🟡 ${{ steps.files-and-lines.outputs.lines }} lines, ${{ steps.files-and-lines.outputs.files }} files" neutral skipping "Also ${{ steps.files-and-lines.outputs.files }} files (threshold: 1)."
 
+      - run: gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" -f 'labels[]=wontfix'
       - id: bypassed
-        run: |
-          jq '.pull_request.labels += [{"name": "self-test-bypass"}]' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/event.json"
-          env GITHUB_EVENT_PATH="$RUNNER_TEMP/event.json" INPUT_THRESHOLDS=1:fail INPUT_FILE-THRESHOLD=50 INPUT_EXCLUDE='dist/**' \
-            INPUT_BYPASS-LABEL=self-test-bypass INPUT_TOKEN="$GH_TOKEN" node dist/index.mjs
+        uses: ./
+        with:
+          exclude: dist/**
+          thresholds: 1:fail
+          bypass-label: wontfix
+      - if: always()
+        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/$PR/labels/wontfix"
       - run: test "${{ steps.bypassed.outputs.level }}" = fail
       - run: .github/self-test-assert.sh "bite-the-diff 🟠 ${{ steps.bypassed.outputs.lines }} lines" neutral skipping "let this one through whole"
 

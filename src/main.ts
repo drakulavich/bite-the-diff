@@ -116,8 +116,7 @@ async function warnOn403(what: string, changed: string, write: () => Promise<voi
 
 async function run() {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH!, "utf8"));
-  const pr: PullRequest | undefined = event.pull_request;
-  if (!pr) throw new Error("bite-the-diff runs on pull_request events");
+  if (!event.pull_request) throw new Error("bite-the-diff runs on pull_request events");
 
   const thresholds = parseThresholds(input("thresholds"));
   const fileThreshold = parseFileThreshold(input("file-threshold"));
@@ -125,6 +124,7 @@ async function run() {
     .split("\n")
     .map((glob) => glob.trim())
     .filter(Boolean);
+  const pr = await api<PullRequest>("GET", `/pulls/${event.pull_request.number}`);
   const capped = pr.changed_files > MAX_LISTED_FILES;
   const listed = capped ? null : await Array.fromAsync(pages<PrFile>(`/pulls/${pr.number}/files`));
   const lines = listed ? countLines(listed, exclude) : pr.additions + pr.deletions;
