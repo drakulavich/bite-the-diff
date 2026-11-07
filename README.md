@@ -65,7 +65,7 @@ jobs:
 
 Lock files and generated code count by default, so `exclude` lists them. `**/` matches a path at the root and in any folder; a bare `bun.lock` matches only the root. Deleted lines count, and so does a removed file.
 
-The action works from the API alone, so the job needs no checkout. `labeled` and `unlabeled` are in `types` so the check follows the bypass label. The `concurrency` block stops two runs racing to create the comment.
+The action works from the API alone, so the job needs no checkout. `labeled` and `unlabeled` are in `types` so the check follows the bypass label. The `concurrency` block stops two runs racing to create the comment. GitHub keeps one pending run per group, so two or more labels added right after a PR opens can still leave a `CANCELLED` `bite-the-diff` check; it blocks nothing, and a Dependabot config that sets one label avoids it, unless the repo also has `major`, `minor` or `patch` labels.
 
 To make the limit binding, require the job (`bite-the-diff` in the workflow above), which fails only past a `fail` threshold's tolerance. The check run's name changes with the size, so it cannot be a required check.
 
