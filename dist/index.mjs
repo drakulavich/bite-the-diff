@@ -1863,26 +1863,48 @@ function commentBody(decision, { bypassLabel, cappedFiles }) {
 // src/main.ts
 class ApiError extends Error {
   status;
-  constructor(status, route) {
-    super(`GitHub API ${route}: ${status}`);
+  transient;
+  constructor(status, route, detail = status) {
+    super(`GitHub API ${route}: ${detail}`);
     this.status = status;
+    this.transient = status === null || status === 429 || status >= 500;
   }
 }
+var TIMEOUT_MS = 30000;
+var RETRIES = 2;
 var input = (name) => (process.env[`INPUT_${name.toUpperCase()}`] ?? "").trim();
 var repoUrl = `${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}`;
+async function attempt(method, path, body) {
+  const route = `${method} ${path}`;
+  let res;
+  try {
+    res = await fetch(`${repoUrl}${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${input("token")}`,
+        accept: "application/vnd.github+json",
+        "x-github-api-version": "2022-11-28"
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+    if (res.ok)
+      return res.status === 204 ? undefined : await res.json();
+  } catch (error) {
+    throw new ApiError(null, route, error instanceof Error ? error.message : error);
+  }
+  throw new ApiError(res.status, route);
+}
 async function api(method, path, body) {
-  const res = await fetch(`${repoUrl}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${input("token")}`,
-      accept: "application/vnd.github+json",
-      "x-github-api-version": "2022-11-28"
-    },
-    body: body === undefined ? undefined : JSON.stringify(body)
-  });
-  if (!res.ok)
-    throw new ApiError(res.status, `${method} ${path}`);
-  return res.status === 204 ? undefined : await res.json();
+  for (let retry = 1;; retry++) {
+    try {
+      return await attempt(method, path, body);
+    } catch (error) {
+      if (!(error instanceof ApiError && error.transient) || retry > RETRIES)
+        throw error;
+      await new Promise((resolve) => setTimeout(resolve, retry * 1000));
+    }
+  }
 }
 async function* pages(path, items = (page) => page) {
   for (let page = 1;; page++) {
@@ -1939,14 +1961,24 @@ async function updateCheckRun(pr, decision) {
   else if (decision.level !== "none")
     await api("POST", "/check-runs", { ...fields, head_sha: pr.head.sha });
 }
-async function warnOn403(what, changed, write) {
+var report = (line) => appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}
+`);
+async function warnOnWriteFailure(what, permission, changed, write) {
   try {
     await write();
   } catch (error) {
-    if (!(error instanceof ApiError && error.status === 403))
+    if (!(error instanceof ApiError) || error.status !== 403 && !error.transient)
       throw error;
-    console.log(`::warning::bite-the-diff could not write the ${what}: the token got a 403. This PR changes ${changed}.`);
+    const reason = error.status === 403 ? `the token got a 403. Add \`${permission}\` to the job's permissions.` : `${error.message}.`;
+    const problem = `bite-the-diff could not write the ${what}: ${reason}`;
+    console.log(`::warning::${problem} This PR changes ${changed}.`);
+    report(problem);
   }
+}
+async function readPull(number) {
+  const pr = await api("GET", `/pulls/${number}`);
+  const capped = pr.changed_files > MAX_LISTED_FILES;
+  return { pr, capped, listed: capped ? null : await Array.fromAsync(pages(`/pulls/${pr.number}/files`)) };
 }
 async function run() {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
@@ -1956,9 +1988,18 @@ async function run() {
   const fileThreshold = parseFileThreshold(input("file-threshold"));
   const exclude = input("exclude").split(`
 `).map((glob) => glob.trim()).filter(Boolean);
-  const pr = await api("GET", `/pulls/${event.pull_request.number}`);
-  const capped = pr.changed_files > MAX_LISTED_FILES;
-  const listed = capped ? null : await Array.fromAsync(pages(`/pulls/${pr.number}/files`));
+  let pull;
+  try {
+    pull = await readPull(event.pull_request.number);
+  } catch (error) {
+    if (!(error instanceof ApiError && error.transient))
+      throw error;
+    const problem = `bite-the-diff could not read the PR: ${error.message}. No count this run.`;
+    console.log(`::warning::${problem}`);
+    report(problem);
+    return;
+  }
+  const { pr, capped, listed } = pull;
   const lines = listed ? countLines(listed, exclude) : pr.additions + pr.deletions;
   const files = listed ? countFiles(listed, exclude) : pr.changed_files;
   const decision = withFileThreshold(decide(lines, thresholds, pr.labels.some((label) => label.name === input("bypass-label"))), files, fileThreshold);
@@ -1966,10 +2007,9 @@ async function run() {
 level=${decision.level}
 files=${files}
 `);
-  appendFileSync(process.env.GITHUB_STEP_SUMMARY, `bite-the-diff: ${size(decision)}, level ${decision.level}.
-`);
-  await warnOn403("comment", size(decision), () => updateComment(pr, decision, capped));
-  await warnOn403("check run", size(decision), () => updateCheckRun(pr, decision));
+  report(`bite-the-diff: ${size(decision)}, level ${decision.level}.`);
+  await warnOnWriteFailure("comment", "pull-requests: write", size(decision), () => updateComment(pr, decision, capped));
+  await warnOnWriteFailure("check run", "checks: write", size(decision), () => updateCheckRun(pr, decision));
   if (decision.failsJob) {
     console.log(`::error::This PR changes ${plural(lines, "line")}, past the failing threshold of ${decision.threshold}.`);
     process.exitCode = 1;

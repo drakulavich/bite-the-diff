@@ -230,19 +230,23 @@ describe("dropping under the thresholds", () => {
     github.files = sized(40);
     const result = await github.runAction();
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("::warning::bite-the-diff could not write the comment: the token got a 403. This PR changes 40 lines.\n");
-    expect(result.summary).toBe("bite-the-diff: 40 lines, level none.\n");
+    expect(result.stdout).toBe(
+      "::warning::bite-the-diff could not write the comment: the token got a 403. Add `pull-requests: write` to the job's permissions. This PR changes 40 lines.\n",
+    );
+    expect(result.summary).toBe(
+      "bite-the-diff: 40 lines, level none.\nbite-the-diff could not write the comment: the token got a 403. Add `pull-requests: write` to the job's permissions.\n",
+    );
     expect(github.comments).toEqual([{ id: 500, body: `${MARKER}\nold` }]);
     expect(github.checkRuns).toEqual([{ id: 7, name: "bite-the-diff 40 lines", conclusion: "success", head_sha: HEAD_SHA }]);
   });
 
   test("any other error on the delete fails the run with its status", async () => {
     github.comments = [{ id: 500, body: `${MARKER}\nold` }];
-    github.failWith = { route: "DELETE /issues/comments", status: 500 };
+    github.failWith = { route: "DELETE /issues/comments", status: 422 };
     github.files = sized(40);
     const result = await github.runAction();
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe("::error::GitHub API DELETE /issues/comments/500: 500\n");
+    expect(result.stdout).toBe("::error::GitHub API DELETE /issues/comments/500: 422\n");
     expect(result.summary).toBe("bite-the-diff: 40 lines, level none.\n");
   });
 
@@ -325,7 +329,9 @@ describe("one line, one file", () => {
     github.files = sized(1);
     const result = await github.runAction({ inputs: { thresholds: "0:fail" } });
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain("::warning::bite-the-diff could not write the comment: the token got a 403. This PR changes 1 line.");
+    expect(result.stdout).toContain(
+      "::warning::bite-the-diff could not write the comment: the token got a 403. Add `pull-requests: write` to the job's permissions. This PR changes 1 line.",
+    );
     expect(result.stdout).toContain("::error::This PR changes 1 line, past the failing threshold of 0.");
   });
 });
@@ -471,7 +477,9 @@ describe("API failures", () => {
     github.files = sized(1240);
     const result = await github.runAction();
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("::warning::bite-the-diff could not write the comment: the token got a 403. This PR changes 1240 lines.");
+    expect(result.stdout).toContain(
+      "::warning::bite-the-diff could not write the comment: the token got a 403. Add `pull-requests: write` to the job's permissions. This PR changes 1240 lines.",
+    );
     expect(result.summary).toContain("1240 lines");
     expect(github.checkRuns).toHaveLength(1);
   });
@@ -481,7 +489,9 @@ describe("API failures", () => {
     github.files = sized(1240);
     const result = await github.runAction();
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("::warning::bite-the-diff could not write the check run: the token got a 403. This PR changes 1240 lines.");
+    expect(result.stdout).toContain(
+      "::warning::bite-the-diff could not write the check run: the token got a 403. Add `checks: write` to the job's permissions. This PR changes 1240 lines.",
+    );
     expect(github.comments).toHaveLength(1);
   });
 
@@ -496,11 +506,11 @@ describe("API failures", () => {
   });
 
   test("any other error on the comment fails the run with its status", async () => {
-    github.failWith = { route: "POST /issues", status: 500 };
+    github.failWith = { route: "POST /issues", status: 422 };
     github.files = sized(1240);
     const result = await github.runAction();
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain("::error::GitHub API POST /issues/42/comments: 500");
+    expect(result.stdout).toContain("::error::GitHub API POST /issues/42/comments: 422");
     expect(result.summary).toContain("1240 lines");
   });
 
@@ -509,6 +519,183 @@ describe("API failures", () => {
     const result = await github.runAction();
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("::error::GitHub API GET /pulls/42/files?per_page=100&page=1: 403");
+  });
+});
+
+describe("a read-only token gets told which line to add", () => {
+  test("a 403 on both writes: green, the count in the summary, both hints in the summary", async () => {
+    github.forbid.add("comments");
+    github.forbid.add("check-runs");
+    github.files = sized(1240);
+    const result = await github.runAction();
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBe("lines=1240\nlevel=comment\nfiles=1\n");
+    expect(result.summary).toBe(
+      [
+        "bite-the-diff: 1240 lines, level comment.",
+        "bite-the-diff could not write the comment: the token got a 403. Add `pull-requests: write` to the job's permissions.",
+        "bite-the-diff could not write the check run: the token got a 403. Add `checks: write` to the job's permissions.",
+        "",
+      ].join("\n"),
+    );
+    expect(result.stdout).toBe(
+      [
+        "::warning::bite-the-diff could not write the comment: the token got a 403. Add `pull-requests: write` to the job's permissions. This PR changes 1240 lines.",
+        "::warning::bite-the-diff could not write the check run: the token got a 403. Add `checks: write` to the job's permissions. This PR changes 1240 lines.",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("under every threshold nothing is written, so no hint", async () => {
+    github.forbid.add("comments");
+    github.forbid.add("check-runs");
+    github.files = sized(40);
+    const result = await github.runAction();
+    expect(result.stdout).toBe("");
+    expect(result.summary).toBe("bite-the-diff: 40 lines, level none.\n");
+  });
+});
+
+describe("retries", () => {
+  const attempts = (request: string) => github.requests.filter((r) => r === request).length;
+
+  for (const status of [429, 500, 503]) {
+    test(`a ${status} twice on a read, then an answer: a normal run, with no warning`, async () => {
+      github.failWith = { route: "GET /pulls/42/files", status, times: 2 };
+      github.files = sized(1240);
+      const result = await github.runAction();
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("");
+      expect(result.output).toBe("lines=1240\nlevel=comment\nfiles=1\n");
+      expect(attempts("GET /pulls/42/files?per_page=100&page=1")).toBe(3);
+    });
+  }
+
+  test("a 503 once on a write, then an answer: one comment, no warning", async () => {
+    github.failWith = { route: "POST /issues", status: 503, times: 1 };
+    github.files = sized(1240);
+    const result = await github.runAction();
+    expect(result.stdout).toBe("");
+    expect(github.comments).toHaveLength(1);
+    expect(attempts("POST /issues/42/comments")).toBe(2);
+  });
+
+  test("it waits 1 s, then 2 s", async () => {
+    github.failWith = { route: "GET /pulls/42", status: 503 };
+    const result = await github.runAction();
+    expect(result.stderr.split("\n").filter((line) => line.startsWith("sleep "))).toEqual(["sleep 1000", "sleep 2000"]);
+  });
+
+  for (const route of ["GET /pulls/42", "GET /pulls/42/files"]) {
+    test(`a 503 three times on ${route}: a warning and a green step, with no count`, async () => {
+      github.failWith = { route, status: 503 };
+      github.files = sized(5600);
+      const result = await github.runAction();
+      expect(result.exitCode).toBe(0);
+      const failed = route === "GET /pulls/42" ? "GET /pulls/42" : "GET /pulls/42/files?per_page=100&page=1";
+      expect(attempts(failed)).toBe(3);
+      expect(result.stdout).toBe(`::warning::bite-the-diff could not read the PR: GitHub API ${failed}: 503. No count this run.\n`);
+      expect(result.summary).toBe(`bite-the-diff could not read the PR: GitHub API ${failed}: 503. No count this run.\n`);
+      expect(result.output).toBe("");
+      expect(github.comments).toEqual([]);
+      expect(github.checkRuns).toEqual([]);
+    });
+  }
+
+  test("a 503 three times on the comment: a warning, and the check run is still written", async () => {
+    github.failWith = { route: "POST /issues", status: 503 };
+    github.files = sized(1240);
+    const result = await github.runAction();
+    expect(result.exitCode).toBe(0);
+    expect(attempts("POST /issues/42/comments")).toBe(3);
+    expect(result.stdout).toBe("::warning::bite-the-diff could not write the comment: GitHub API POST /issues/42/comments: 503. This PR changes 1240 lines.\n");
+    expect(result.summary).toBe(
+      "bite-the-diff: 1240 lines, level comment.\nbite-the-diff could not write the comment: GitHub API POST /issues/42/comments: 503.\n",
+    );
+    expect(github.checkRuns.map((run) => run.name)).toEqual(["bite-the-diff 🟡 1240 lines"]);
+  });
+
+  test("a 503 three times on the check run: a warning, and the comment is already written", async () => {
+    github.failWith = { route: "POST /check-runs", status: 503 };
+    github.files = sized(1240);
+    const result = await github.runAction();
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("::warning::bite-the-diff could not write the check run: GitHub API POST /check-runs: 503. This PR changes 1240 lines.\n");
+    expect(github.comments).toHaveLength(1);
+  });
+
+  test("a 503 three times on the delete: a warning and a green step", async () => {
+    github.comments = [{ id: 500, body: `${MARKER}\nold` }];
+    github.failWith = { route: "DELETE /issues/comments", status: 503 };
+    github.files = sized(40);
+    const result = await github.runAction();
+    expect(result.exitCode).toBe(0);
+    expect(attempts("DELETE /issues/comments/500")).toBe(3);
+    expect(result.stdout).toBe(
+      "::warning::bite-the-diff could not write the comment: GitHub API DELETE /issues/comments/500: 503. This PR changes 40 lines.\n",
+    );
+  });
+
+  test("a 503 on the writes past a fail threshold: the job is still red, because the count is known", async () => {
+    github.failWith = { route: "POST", status: 503 };
+    github.files = sized(5600);
+    const result = await github.runAction();
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("::error::This PR changes 5600 lines, past the failing threshold of 5000.");
+  });
+
+  test("a request that hangs: 30 s on each of 3 attempts, then a warning and a green step", async () => {
+    github.hang = "GET /pulls/42";
+    const result = await github.runAction();
+    expect(result.exitCode).toBe(0);
+    expect(attempts("GET /pulls/42")).toBe(3);
+    expect(result.stderr.split("\n").filter((line) => line.startsWith("timeout "))).toEqual(["timeout 30000", "timeout 30000", "timeout 30000"]);
+    expect(result.stdout).toStartWith("::warning::bite-the-diff could not read the PR: GitHub API GET /pulls/42: ");
+    expect(result.output).toBe("");
+  });
+
+  test("a connection that drops: 3 attempts, then a warning and a green step", async () => {
+    let connections = 0;
+    const dropping = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        open(socket) {
+          connections++;
+          socket.end();
+        },
+        data() {},
+      },
+    });
+    const result = await github.runAction({ apiUrl: `http://127.0.0.1:${dropping.port}` });
+    dropping.stop(true);
+    expect(result.exitCode).toBe(0);
+    expect(connections).toBe(3);
+    expect(result.stdout).toStartWith("::warning::bite-the-diff could not read the PR: GitHub API GET /pulls/42: ");
+  });
+
+  for (const [route, status, request] of [
+    ["GET /pulls/42", 401, "GET /pulls/42"],
+    ["GET /pulls/42", 404, "GET /pulls/42"],
+    ["POST /issues", 401, "POST /issues/42/comments"],
+    ["POST /check-runs", 401, "POST /check-runs"],
+  ] as const) {
+    test(`a ${status} on ${request}: red at once, with no retry`, async () => {
+      github.failWith = { route, status };
+      github.files = sized(1240);
+      const result = await github.runAction();
+      expect(result.exitCode).toBe(1);
+      expect(attempts(request)).toBe(1);
+      expect(result.stdout).toContain(`::error::GitHub API ${request}: ${status}`);
+    });
+  }
+
+  test("a 403 on a write is not retried", async () => {
+    github.forbid.add("comments");
+    github.files = sized(1240);
+    await github.runAction();
+    expect(attempts("POST /issues/42/comments")).toBe(1);
   });
 });
 
@@ -712,7 +899,9 @@ describe("file-threshold", () => {
     github.files = spread(63, 63);
     const result = await github.runAction();
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("::warning::bite-the-diff could not write the comment: the token got a 403. This PR changes 63 lines, 63 files.");
+    expect(result.stdout).toContain(
+      "::warning::bite-the-diff could not write the comment: the token got a 403. Add `pull-requests: write` to the job's permissions. This PR changes 63 lines, 63 files.",
+    );
   });
 });
 
