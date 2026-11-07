@@ -44,7 +44,7 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
 concurrency:
   group: bite-the-diff-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 permissions:
   pull-requests: write
   checks: write
