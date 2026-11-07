@@ -11,3 +11,9 @@ jobs:
           exclude: .github/**
           thresholds: 1:comment
       - run: echo "lines=${{ steps.size.outputs.lines }} level=${{ steps.size.outputs.level }} files=${{ steps.size.outputs.files }}"
+      - env:
+          TOKEN: ${{ github.token }}
+        run: |
+          env INPUT_THRESHOLDS=1:comment INPUT_FILE-THRESHOLD=50 INPUT_EXCLUDE='.github/**' INPUT_BYPASS-LABEL=elefante INPUT_TOKEN="$TOKEN" node dist/index.mjs
+          echo "--- summary file"
+          cat "$GITHUB_STEP_SUMMARY"
