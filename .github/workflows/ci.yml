@@ -31,8 +31,24 @@ jobs:
       - run: bun run build
       - run: git diff --exit-code -- dist/
 
-  self-test:
+  pr-size:
     if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      big-enough: ${{ steps.count.outputs.big-enough }}
+    steps:
+      - id: count
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/${{ github.event.pull_request.number }}/files" --jq '.[] | select(.filename | startswith("dist/") | not) | .additions + .deletions' > counts
+          awk '{ lines += $1 } END { print "big-enough=" (lines >= 2 && NR >= 2 ? "true" : "false") }' counts >> "$GITHUB_OUTPUT"
+
+  self-test:
+    needs: pr-size
+    if: github.event.pull_request.head.repo.full_name == github.repository && needs.pr-size.outputs.big-enough == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -122,7 +138,8 @@ jobs:
       - run: .github/self-test-assert.sh "bite-the-diff ${{ steps.under.outputs.lines }} lines" success pass
 
   self-test-read-only:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: pr-size
+    if: github.event.pull_request.head.repo.full_name == github.repository && needs.pr-size.outputs.big-enough == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
