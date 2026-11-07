@@ -1,0 +1,19 @@
+name: no-cancel-probe
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+concurrency:
+  group: no-cancel-probe-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+jobs:
+  bite-the-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./
+        with:
+          thresholds: 1000000:comment
