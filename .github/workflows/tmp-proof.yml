@@ -13,5 +13,6 @@ jobs:
         uses: ./
         with:
           exclude: .github/**
-          thresholds: 1:comment
+          thresholds: 1000000:comment
+          file-threshold: 0
       - run: echo "lines=${{ steps.size.outputs.lines }} level=${{ steps.size.outputs.level }} files=${{ steps.size.outputs.files }}"
