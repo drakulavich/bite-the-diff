@@ -1,0 +1,12 @@
+name: probe-p6
+on:
+  pull_request:
+    types: [opened, labeled]
+permissions:
+  contents: read
+jobs:
+  size:
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
