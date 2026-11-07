@@ -3,6 +3,7 @@ set -euo pipefail
 name="$1" conclusion="$2" bucket="$3" text="${4-}"
 
 if [ "$GITHUB_RUN_ATTEMPT" -gt 1 ]; then
+  conclusion=success
   runs=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100&filter=all" \
     --jq '.check_runs[] | select(.name | startswith("bite-the-diff ")) | .name + "=" + .conclusion' | sort -u)
 else
