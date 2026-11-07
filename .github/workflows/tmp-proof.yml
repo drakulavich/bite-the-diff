@@ -1,0 +1,31 @@
+name: tmp-proof
+on: pull_request
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "== before attempt $GITHUB_RUN_ATTEMPT"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100" --jq '.check_runs[]|"latest \(.id) \(.name) \(.conclusion)"'
+          gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100&filter=all" --jq '.check_runs[]|"all \(.id) \(.name) \(.conclusion)"'
+      - uses: ./
+        with:
+          exclude: .github/**
+          thresholds: 1:fail
+      - if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "== after attempt $GITHUB_RUN_ATTEMPT"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100" --jq '.check_runs[]|"latest \(.id) \(.name) \(.conclusion)"'
+          gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100&filter=all" --jq '.check_runs[]|"all \(.id) \(.name) \(.conclusion)"'
