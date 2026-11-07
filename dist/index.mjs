@@ -1925,7 +1925,7 @@ async function api(method, path, body) {
 }
 async function* pages(path, items = (page) => page) {
   for (let page = 1;; page++) {
-    const batch = items(await api("GET", `${path}?per_page=100&page=${page}`));
+    const batch = items(await api("GET", `${path}${path.includes('check-runs')?'?filter=all&':'?'}per_page=100&page=${page}`));
     yield* batch;
     if (batch.length < 100)
       return;
