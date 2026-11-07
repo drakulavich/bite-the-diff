@@ -1,0 +1,20 @@
+name: probe-p8
+on:
+  pull_request:
+    types: [opened, labeled]
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - id: a
+        uses: ./
+        with:
+          thresholds: 1:comment
+          exclude: |
+            .github/**
+      - run: echo "DUMP lines=${{ steps.a.outputs.lines }} files=${{ steps.a.outputs.files }} level=${{ steps.a.outputs.level }}"
