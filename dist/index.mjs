@@ -1923,9 +1923,9 @@ async function api(method, path, body) {
     }
   }
 }
-async function* pages(path, items = (page) => page) {
+async function* pages(path, items = (page) => page, query = "") {
   for (let page = 1;; page++) {
-    const batch = items(await api("GET", `${path}?per_page=100&page=${page}`));
+    const batch = items(await api("GET", `${path}?per_page=100&page=${page}${query}`));
     yield* batch;
     if (batch.length < 100)
       return;
@@ -1963,7 +1963,7 @@ async function updateComment(pr, decision, capped) {
     await api("POST", `/issues/${pr.number}/comments`, { body });
 }
 async function updateCheckRun(pr, decision) {
-  const existing = await findFirst(pages(`/commits/${pr.head.sha}/check-runs`, (page) => page.check_runs), (run) => run.name.startsWith(CHECK_PREFIX));
+  const existing = await findFirst(pages(`/commits/${pr.head.sha}/check-runs`, (page) => page.check_runs, "&filter=all"), (run) => run.name.startsWith(CHECK_PREFIX));
   const fields = {
     name: decision.checkName,
     status: "completed",

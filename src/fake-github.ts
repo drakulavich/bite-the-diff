@@ -40,6 +40,7 @@ export class FakeGitHub {
   requests: string[] = [];
   authorizations: (string | null)[] = [];
   forbid = new Set<"comments" | "check-runs">();
+  earlierAttempt = new Set<number>();
   deletedElsewhere = new Set<number>();
   failWith: { route: string; status: number; times?: number } | null = null;
   hang: string | null = null;
@@ -97,8 +98,9 @@ export class FakeGitHub {
       return new Response(null, { status: recorded.deleteComment.status });
     }
     if (route === `GET /commits/${this.pull.head.sha}/check-runs`) {
-      const runs = page(this.checkRuns, url).map((run) => ({ ...recorded.checkRun, ...run }));
-      return jsonResponse(200, { total_count: this.checkRuns.length, check_runs: runs });
+      const listed = url.searchParams.get("filter") === "all" ? this.checkRuns : this.checkRuns.filter((run) => !this.earlierAttempt.has(run.id));
+      const runs = page(listed, url).map((run) => ({ ...recorded.checkRun, ...run }));
+      return jsonResponse(200, { total_count: listed.length, check_runs: runs });
     }
     if (route === "POST /check-runs") {
       const run = { id: this.nextId++, name: body.name, conclusion: body.conclusion, head_sha: body.head_sha };

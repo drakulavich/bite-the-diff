@@ -75,9 +75,9 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
   }
 }
 
-async function* pages<T>(path: string, items: (page: T[] & { check_runs: T[] }) => T[] = (page) => page) {
+async function* pages<T>(path: string, items: (page: T[] & { check_runs: T[] }) => T[] = (page) => page, query = "") {
   for (let page = 1; ; page++) {
-    const batch = items(await api("GET", `${path}?per_page=100&page=${page}`));
+    const batch = items(await api("GET", `${path}?per_page=100&page=${page}${query}`));
     yield* batch;
     if (batch.length < 100) return;
   }
@@ -114,7 +114,8 @@ async function updateComment(pr: PullRequest, decision: Decision, capped: boolea
 
 async function updateCheckRun(pr: PullRequest, decision: Decision) {
   const existing = await findFirst(
-    pages<{ id: number; name: string }>(`/commits/${pr.head.sha}/check-runs`, (page) => page.check_runs),
+    // Without filter=all a re-run misses the check run of the attempt before, and GitHub restores that one when the re-run ends.
+    pages<{ id: number; name: string }>(`/commits/${pr.head.sha}/check-runs`, (page) => page.check_runs, "&filter=all"),
     (run) => run.name.startsWith(CHECK_PREFIX),
   );
   const fields = {

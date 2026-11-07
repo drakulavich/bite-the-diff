@@ -217,7 +217,7 @@ describe("dropping under the thresholds", () => {
       "GET /pulls/42",
       "GET /pulls/42/files?per_page=100&page=1",
       "GET /issues/42/comments?per_page=100&page=1",
-      `GET /commits/${HEAD_SHA}/check-runs?per_page=100&page=1`,
+      `GET /commits/${HEAD_SHA}/check-runs?per_page=100&page=1&filter=all`,
     ]);
     expect(github.comments).toEqual([{ id: 7, body: "looks big" }]);
   });
@@ -419,7 +419,7 @@ describe("at most one check run per commit", () => {
   test("uses the head sha of the PR, not GITHUB_SHA", async () => {
     github.files = sized(1240);
     await github.runAction();
-    expect(github.requests).toContain(`GET /commits/${HEAD_SHA}/check-runs?per_page=100&page=1`);
+    expect(github.requests).toContain(`GET /commits/${HEAD_SHA}/check-runs?per_page=100&page=1&filter=all`);
     expect(github.checkRuns[0]!.head_sha).toBe(HEAD_SHA);
   });
 
@@ -459,10 +459,19 @@ describe("a re-run: the event keeps what it held at the first attempt, the API h
     expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
   });
 
+  test("the check run of the first attempt, listed only with filter=all, turns from failure to neutral", async () => {
+    github.checkRuns = [{ id: 7, name: "bite-the-diff 🔴 5600 lines", conclusion: "failure", head_sha: HEAD_SHA }];
+    github.earlierAttempt.add(7);
+    github.files = sized(5600);
+    const result = await github.runAction({ labels: [LABEL] });
+    expect(result.exitCode).toBe(0);
+    expect(github.checkRuns).toEqual([{ id: 7, name: "bite-the-diff 🟠 5600 lines", conclusion: "neutral", head_sha: HEAD_SHA }]);
+  });
+
   test("a commit pushed since: the check run lands on the live head", async () => {
     github.files = sized(1240);
     await github.runAction({ eventPr: { head: { sha: "0ld5ha" } }, prFields: { head: { sha: "live5ha" } } });
-    expect(github.requests).toContain("GET /commits/live5ha/check-runs?per_page=100&page=1");
+    expect(github.requests).toContain("GET /commits/live5ha/check-runs?per_page=100&page=1&filter=all");
     expect(github.checkRuns[0]!.head_sha).toBe("live5ha");
   });
 
