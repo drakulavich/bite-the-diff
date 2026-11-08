@@ -6,14 +6,14 @@
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/runtime-Node%2024-339933?logo=nodedotjs&logoColor=white" alt="Runtime: Node 24"></a>
 </p>
 
-<p align="center"><b>🐘 bite-the-diff flags a PR that is too big to review and says how to cut it into bites.</b> This GitHub Action counts a PR's changed lines and files against its base. Over a threshold it posts one comment that says so and lists the ways to split the PR, so an agent or a person reading the PR needs nothing else installed. An agent sees this when it reads the PR's comments or <code>gh pr checks</code>: the action pushes nothing to it.</p>
+<p align="center"><b>🐘 bite-the-diff flags a PR that is too big to review and says how to cut it into bites.</b> This GitHub Action counts a PR's changed lines and files against its base, and over a threshold it posts one comment that lists the ways to split the PR. A person or an agent finds the result on the PR with nothing else installed: the comment among its comments, and the check run in its checks and in <code>gh pr checks</code>.</p>
 
 - **One comment**: updated in place on every run, with the ways to split the PR in a collapsed list, and deleted once the PR is under every threshold
 - **A soft status at 1000 and 3000 lines**: a `neutral` check run, and the job stays green
-- **A red check from 5500 lines**: the `5000:fail` threshold plus its 10% tolerance
+- **A red check from 5500 lines**: for the `5000:fail` threshold
 - **A comment on many files**: from 50 files, and it never fails the job
-- **Stacks count per layer**: while a stacked PR's base is its parent branch, it counts only its own diff; for a parent's squash merge, see [Limits](#limits)
-- **Lock files left out**: well-known lock files in any folder do not count
+- **Stacks count per layer**: while a stacked PR's base is its parent branch, it counts only its own diff; see [Limits](#limits) before deleting a parent's branch
+- **Lock files left out**: well-known lock files in any folder do not count, see [What is not counted](#what-is-not-counted)
 - **`elefante` for the diff that cannot be cut**: this label lets a PR past a `fail` threshold pass
 
 A PR of 1240 lines gets a `neutral` check run named `bite-the-diff 🟡 1240 lines` and this comment:
@@ -52,18 +52,9 @@ jobs:
       # your other steps
 ```
 
-Job-level `permissions` replace the workflow's, so list what your other steps need too.
+Job-level `permissions` replace the workflow's, so list what your other steps need too. The step needs no `concurrency` block.
 
-- **Red tier:** past a `fail` threshold's tolerance the step fails the job and later steps are skipped, so put it first. To let a PR through, add the bypass label, then press Re-run: the action reads labels and the head commit from the API, so a re-run sees the label and writes to the live head.
-- **`continue-on-error: true`:** later steps run and the job is green, but the separate check run keeps the PR red when the token can write checks. A required check on that job then passes.
-- **No write permissions:** the result is only in the job summary and in warnings, which name the line to add, so there is no comment and no red check run. Tested on a public repo with `permissions: {}` and with read-only permissions.
-- **Under every threshold:** no comment and no check run.
-
-The step needs no `concurrency` block: 25 rounds of two quick pushes left one comment each.
-
-Lock files stay out of the count in any folder: `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`, `Cargo.lock`, `go.sum`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `composer.lock`, `Gemfile.lock`, `gradle.lockfile` and `buildscript-gradle.lockfile`. The list cannot be turned off. Recounted over real merged PRs, it moved few of them to a lower tier. Add your own paths, such as generated code, with `exclude`. `**/` matches a path at the root and in any folder; a bare `generated.ts` matches only the root. Deleted lines count, and so does a removed file.
-
-To make the limit binding, require the job, which fails only past a `fail` threshold's tolerance. The check run's name changes with the size, so it cannot be a required check.
+Past a `fail` threshold the step fails the job and later steps are skipped, so put it first. To let such a PR through, add the bypass label, then press Re-run. The action reads labels and the head commit from the API, so a re-run sees the label and writes to the live head.
 
 ### A separate workflow, for a label that acts without a re-run
 
@@ -87,7 +78,14 @@ jobs:
       - uses: drakulavich/bite-the-diff@v1
 ```
 
-`labeled` and `unlabeled` make the check follow the bypass label. `concurrency` stops runs racing to create the comment: without it, three labels added at once left two comments in 5 of 5 tries. `queue: max` keeps up to 100 runs waiting, and three labels at once left none cancelled; without it GitHub keeps one pending run and two runs per PR ended `CANCELLED`. actionlint 1.7.12 rejects the key (`unexpected key "queue"`).
+`labeled` and `unlabeled` make the check follow the bypass label. Adding several labels at once starts one run per label. The `concurrency` group makes the runs for one PR take turns, so they do not race to create two comments. A group keeps one pending run by default and cancels the rest; `queue: max` keeps up to 100 waiting, so no run ends `CANCELLED`. Some actionlint versions reject the `queue` key.
+
+## How it reports, and how to make it binding
+
+- **Comment and check run**: the comment needs `pull-requests: write` and the check run needs `checks: write`. The job summary always gets one line with the count and the level.
+- **Without write permissions**: without `pull-requests: write` there is no comment, and without `checks: write` no check run. The result then stays in the job summary and in a warning that names the permission to add. A PR past a `fail` threshold still fails its job. This was tried on public repos only.
+- **`continue-on-error: true`**: later steps run and the job is green, but the check run keeps the PR red when the token can write checks. A required check on that job then passes.
+- **A binding limit**: require the job, which fails only past a `fail` threshold. The check run's name changes with the size, so it cannot be a required check.
 
 ## Inputs
 
@@ -100,6 +98,15 @@ jobs:
 | `token` | `${{ github.token }}` | `pull-requests: write` for the comment and `checks: write` for the check run; without them the result stays in the job summary |
 
 Only the highest threshold reached applies: with `1000:fail` and `5000:comment`, 6000 lines only comment. The lowest `comment` threshold gets 🟡, every other soft status 🟠, and a `fail` without the label 🔴.
+
+### What is not counted
+
+| Left out | Rule |
+|---|---|
+| Lock files, in any folder | `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`, `Cargo.lock`, `go.sum`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `composer.lock`, `Gemfile.lock`, `gradle.lockfile`, `buildscript-gradle.lockfile`. The list cannot be turned off |
+| Paths in `exclude` | Your own globs, such as generated code. `**/` matches a path at the root and in any folder; a bare `generated.ts` matches only the root |
+
+Everything else counts, deleted lines and removed files included.
 
 ## Outputs
 
@@ -134,13 +141,13 @@ A PR has at most one comment from this action and a commit at most one check run
 
 ## Limits
 
-- **Forks**: PRs from forks are not supported. Their token is read-only, so there is no comment, and a fork PR over a `fail` threshold still fails its job, which can block a required check.
+- **Forks**: a PR from a fork gets a read-only token, so its result is only in the job summary and in warnings. A fork PR past a `fail` threshold still fails its job, which can block a required check.
 - **3000 files**: `GET /pulls/{n}/files` lists at most 3000 files. Above that, the line and file counts are the PR's totals, without `exclude`, lock files included, and the comment says so.
-- **A parent's squash merge**: a test on this repo's API, with a parent and a child of 600 lines each. Deleting the parent's branch, with `gh pr merge --squash --delete-branch` or with `DELETE /git/refs` after the merge, closed the child with no retarget; it could not be reopened and its base could not be changed. With the branch kept, the child stayed open on that branch and showed 600 lines. Retargeted by hand it showed 1200, its parent's lines included, and 600 again once rebased onto the squash commit. So retarget and rebase the child before you delete its parent's branch. GitHub's docs describe a retarget when the branch is deleted, which neither route did; the web button and the auto-delete setting were not tried.
-- **403**: if the token gets a 403 on writing or deleting the comment or on the check run, the action logs a warning that names the permission, adds it to the job summary and carries on, and a PR past a `fail` threshold's tolerance still fails its job.
-- **API failures**: each request has a 30 s timeout and 2 retries on 429, 5xx and network errors. Once those are spent, a failed read leaves a warning, no outputs and a green step, so an outage does not block a PR. A failed write leaves a warning, and a PR already counted past a `fail` threshold's tolerance still fails its job. A retried write that had in fact gone through can leave a second comment. A 401 and any other 4xx fail the job.
+- **Stacked PRs**: after a squash merge, deleting the parent's branch closes its child for good, and the child can then be neither reopened nor retargeted. Before you delete the branch, retarget the child and rebase it onto the squash commit; retargeted without the rebase, it also counts its parent's lines.
+- **403**: if the token gets a 403 on writing or deleting the comment or on the check run, the action logs a warning that names the permission, adds it to the job summary and carries on, and a PR past a `fail` threshold still fails its job.
+- **API failures**: each request has a 30 s timeout and 2 retries on 429, 5xx and network errors. Once those are spent, a failed read leaves a warning, no outputs and a green step, so an outage does not block a PR. A failed write leaves a warning, and a PR already counted past a `fail` threshold still fails its job. A retried write that had in fact gone through can leave a second comment. A 401 and any other 4xx fail the job.
 - **Merge conflicts**: GitHub does not run `pull_request` workflows while a PR has a merge conflict, so the check waits until it is resolved.
-- **`ubuntu-slim`**: works, about 3-4 s slower than `ubuntu-latest` over 7 runs.
+- **`ubuntu-slim`**: works, a few seconds slower than `ubuntu-latest`.
 
 ## Why it exists
 
