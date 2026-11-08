@@ -23,7 +23,6 @@ jobs:
       checks: write
     steps:
       - uses: drakulavich/bite-the-diff@v1
-        timeout-minutes: 5
       # your other steps
 ```
 
@@ -134,7 +133,6 @@ permissions:
 jobs:
   bite-the-diff:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     steps:
       - uses: drakulavich/bite-the-diff@v1
 ```
@@ -148,6 +146,7 @@ jobs:
 - **Stacked PRs**: after a squash merge, deleting the parent's branch with `gh pr merge --squash --delete-branch` or through the API closed its child for good, and the child could then be neither reopened nor retargeted. The web button and the auto-delete setting were not tried. Before you delete the branch, retarget the child and rebase it onto the squash commit; retargeted without the rebase, it also counts its parent's lines.
 - **403**: if the token gets a 403 on writing or deleting the comment or on the check run, the action logs a warning that names the permission, adds it to the job summary and carries on, and a PR past a `fail` threshold still fails its job.
 - **API failures**: each request has a 30 s timeout and 2 retries on 429, 5xx and network errors. Once those are spent, a failed read leaves a warning, no outputs and a green step, so an outage does not block a PR. A failed write leaves a warning, and a PR already counted past a `fail` threshold still fails its job. A retried write that had in fact gone through can leave a second comment. A 401 and any other 4xx fail the job.
+- **2 minutes**: after 2 minutes the action stops its requests and reports as for any other API failure, so the job needs no `timeout-minutes`.
 - **Merge conflicts**: GitHub does not run `pull_request` workflows while a PR has a merge conflict, so the check waits until it is resolved.
 - **`ubuntu-slim`**: works, a few seconds slower than `ubuntu-latest`.
 
