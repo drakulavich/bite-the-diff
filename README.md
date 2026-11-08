@@ -8,6 +8,11 @@
 
 <p align="center"><b>🐘 bite-the-diff is a GitHub Action that counts a PR's changed lines and files and, when the PR is too big to review, comments on it with ways to cut it into bites and turns its check red past a hard limit.</b></p>
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/explainer-dark.png">
+  <img src="docs/explainer-light.png" width="100%" alt="How bite-the-diff works in three steps: a PR opens or changes, the action counts its changed lines and files without lock files and exclude paths, and it posts one comment and a check run. Default thresholds: under 1000 changed lines it stays quiet, from 1000 and from 3000 it comments, from 5500 the job fails unless the PR is labelled elefante and re-run, and 50 or more files only get a comment.">
+</picture>
+
 ## In thirty seconds
 
 Add one step to a workflow that already runs on `pull_request`. The action works from the API alone, so it needs no checkout.
