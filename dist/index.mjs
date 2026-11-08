@@ -1889,6 +1889,7 @@ class ApiError extends Error {
 }
 var TIMEOUT_MS = 30000;
 var RETRIES = 2;
+var deadline = AbortSignal.timeout(120000);
 var input = (name) => (process.env[`INPUT_${name.toUpperCase()}`] ?? "").trim();
 var repoUrl = `${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}`;
 async function attempt(method, path, body) {
@@ -1903,12 +1904,12 @@ async function attempt(method, path, body) {
         "x-github-api-version": "2022-11-28"
       },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT_MS)
+      signal: AbortSignal.any([AbortSignal.timeout(TIMEOUT_MS), deadline])
     });
     if (res.ok)
       return res.status === 204 ? undefined : await res.json();
   } catch (error) {
-    throw new ApiError(null, route, error instanceof Error ? error.message : error);
+    throw new ApiError(null, route, deadline.aborted ? "the 2-minute limit was reached" : error instanceof Error ? error.message : error);
   }
   throw new ApiError(res.status, route);
 }
@@ -1917,7 +1918,7 @@ async function api(method, path, body) {
     try {
       return await attempt(method, path, body);
     } catch (error) {
-      if (!(error instanceof ApiError && error.transient) || retry > RETRIES)
+      if (!(error instanceof ApiError && error.transient) || retry > RETRIES || deadline.aborted)
         throw error;
       await new Promise((resolve) => setTimeout(resolve, retry * 1000));
     }

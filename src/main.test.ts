@@ -698,9 +698,48 @@ describe("retries", () => {
     const result = await github.runAction();
     expect(result.exitCode).toBe(0);
     expect(attempts("GET /pulls/42")).toBe(3);
-    expect(result.stderr.split("\n").filter((line) => line.startsWith("timeout "))).toEqual(["timeout 30000", "timeout 30000", "timeout 30000"]);
+    expect(result.stderr.split("\n").filter((line) => line.startsWith("timeout "))).toEqual([
+      "timeout 120000",
+      "timeout 30000",
+      "timeout 30000",
+      "timeout 30000",
+    ]);
     expect(result.stdout).toStartWith("::warning::bite-the-diff could not read the PR: GitHub API GET /pulls/42: ");
     expect(result.output).toBe("");
+  });
+
+  test("every request hangs: the run stops at the 2-minute limit with a warning and a green step", async () => {
+    github.hang = "GET";
+    github.deadlineMs = 500;
+    const started = Date.now();
+    const result = await github.runAction();
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(
+      "::warning::bite-the-diff could not read the PR: GitHub API GET /pulls/42: the 2-minute limit was reached. No count this run.\n",
+    );
+    expect(result.output).toBe("");
+  });
+
+  test("no retry starts once the 2-minute limit has passed", async () => {
+    github.hang = "GET /pulls/42";
+    github.deadlineMs = 500;
+    const result = await github.runAction();
+    expect(attempts("GET /pulls/42")).toBe(1);
+    expect(result.stderr.split("\n").filter((line) => line.startsWith("sleep "))).toEqual([]);
+  });
+
+  test("past a fail threshold, writes that hang until the 2-minute limit: warnings and a red job", async () => {
+    github.hang = "POST";
+    github.deadlineMs = 500;
+    github.files = sized(5600);
+    const result = await github.runAction();
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe(
+      "::warning::bite-the-diff could not write the comment: GitHub API POST /issues/42/comments: the 2-minute limit was reached. This PR changes 5600 lines.\n" +
+        "::warning::bite-the-diff could not write the check run: GitHub API GET /commits/aaaa1111/check-runs?per_page=100&page=1&filter=all: the 2-minute limit was reached. This PR changes 5600 lines.\n" +
+        "::error::This PR changes 5600 lines, past the failing threshold of 5000.\n",
+    );
   });
 
   test("a connection that drops: 3 attempts, then a warning and a green step", async () => {
