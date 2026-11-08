@@ -35,7 +35,7 @@ describe("parseFileThreshold", () => {
 describe("countFiles", () => {
   const files = [
     { filename: "src/a.ts", additions: 10, deletions: 5 },
-    { filename: "bun.lock", additions: 700, deletions: 20 },
+    { filename: "data.lock", additions: 700, deletions: 20 },
     { filename: "dist/index.mjs", additions: 300, deletions: 100 },
     { filename: ".hidden/gen.ts", additions: 3, deletions: 0 },
   ];
@@ -112,7 +112,7 @@ describe("withFileThreshold", () => {
 describe("countLines", () => {
   const files = [
     { filename: "src/a.ts", additions: 10, deletions: 5 },
-    { filename: "bun.lock", additions: 700, deletions: 20 },
+    { filename: "data.lock", additions: 700, deletions: 20 },
     { filename: "dist/index.mjs", additions: 300, deletions: 100 },
     { filename: "gone.ts", additions: 0, deletions: 40 },
     { filename: ".hidden/gen.ts", additions: 3, deletions: 0 },
@@ -128,6 +128,53 @@ describe("countLines", () => {
 
   test("a glob reaches a dot directory", () => {
     expect(countLines(files, ["**/gen.ts"])).toBe(1175);
+  });
+});
+
+describe("built-in lock files", () => {
+  const names = [
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "bun.lock",
+    "bun.lockb",
+    "Cargo.lock",
+    "go.sum",
+    "poetry.lock",
+    "uv.lock",
+    "Pipfile.lock",
+    "composer.lock",
+    "Gemfile.lock",
+    "gradle.lockfile",
+    "buildscript-gradle.lockfile",
+  ];
+
+  for (const name of names) {
+    test(`${name} is left out at the root and in any folder`, () => {
+      const files = [
+        { filename: name, additions: 700, deletions: 20 },
+        { filename: `packages/.app/${name}`, additions: 300, deletions: 0 },
+        { filename: "src/a.ts", additions: 10, deletions: 5 },
+      ];
+      expect(countLines(files, [])).toBe(15);
+      expect(countFiles(files, [])).toBe(1);
+    });
+  }
+
+  for (const name of ["package-lock.json.bak", "docs/yarn.lock.md", "src/lock.ts", "my-package-lock.json", "go.summary", "bun.lock/readme.md"]) {
+    test(`${name} still counts`, () => {
+      expect(countLines([{ filename: name, additions: 10, deletions: 5 }], [])).toBe(15);
+    });
+  }
+
+  test("the exclude input adds to the list", () => {
+    const files = [
+      { filename: "bun.lock", additions: 700, deletions: 20 },
+      { filename: "dist/index.mjs", additions: 300, deletions: 100 },
+      { filename: "src/a.ts", additions: 10, deletions: 5 },
+    ];
+    expect(countLines(files, ["dist/**"])).toBe(15);
   });
 });
 

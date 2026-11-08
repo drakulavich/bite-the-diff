@@ -11,6 +11,19 @@ export const HEAD_SHA = "aaaa1111";
 type CheckOutput = { title: string; summary: string };
 type WriteBody = { body: string; name: string; conclusion: string; head_sha: string; output: CheckOutput };
 
+const PRELOAD = `
+const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+AbortSignal.timeout = (ms) => {
+  console.error("timeout " + ms);
+  return realTimeout(Number(process.env.FAKE_TIMEOUT_MS));
+};
+const realSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = (callback, ms, ...rest) => {
+  console.error("sleep " + ms);
+  return realSetTimeout(callback, 0, ...rest);
+};
+`;
+
 const jsonResponse = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 function page<T>(items: T[], url: URL): T[] {
@@ -27,9 +40,12 @@ export class FakeGitHub {
   requests: string[] = [];
   authorizations: (string | null)[] = [];
   forbid = new Set<"comments" | "check-runs">();
+  earlierAttempt = new Set<number>();
   deletedElsewhere = new Set<number>();
-  failWith: { route: string; status: number } | null = null;
+  failWith: { route: string; status: number; times?: number } | null = null;
+  hang: string | null = null;
   private nextId = 1000;
+  private pull: { head: { sha: string } } & Record<string, unknown> = recorded.pull;
   private server = Bun.serve({ port: 0, fetch: (req) => this.handle(req) });
 
   stop() {
@@ -43,11 +59,16 @@ export class FakeGitHub {
     this.authorizations.push(req.headers.get("authorization"));
     const body = (req.method === "GET" || req.method === "DELETE" ? null : await req.json()) as WriteBody;
 
-    if (this.failWith && route.startsWith(this.failWith.route)) return jsonResponse(this.failWith.status, { message: "fake failure" });
+    if (this.hang && route.startsWith(this.hang)) return new Promise<Response>(() => {});
+    if (this.failWith && route.startsWith(this.failWith.route) && this.failWith.times !== 0) {
+      if (this.failWith.times) this.failWith.times--;
+      return jsonResponse(this.failWith.status, { message: "fake failure" });
+    }
     if (route.includes("/comments") && req.method !== "GET" && this.forbid.has("comments"))
       return jsonResponse(403, req.method === "DELETE" ? recorded.deleteForbidden : recorded.commentForbidden);
     if (route.includes("/check-runs") && req.method !== "GET" && this.forbid.has("check-runs")) return jsonResponse(403, recorded.checkForbidden);
 
+    if (route === `GET /pulls/${PR_NUMBER}`) return jsonResponse(200, this.pull);
     if (route === `GET /pulls/${PR_NUMBER}/files`) {
       const items = page(this.files, url).map((file) => ({ ...recorded.files[0], ...file, changes: file.additions + file.deletions }));
       return jsonResponse(200, items);
@@ -76,9 +97,10 @@ export class FakeGitHub {
       this.comments = this.comments.filter((c) => c.id !== id);
       return new Response(null, { status: recorded.deleteComment.status });
     }
-    if (route === `GET /commits/${HEAD_SHA}/check-runs`) {
-      const runs = page(this.checkRuns, url).map((run) => ({ ...recorded.checkRun, ...run }));
-      return jsonResponse(200, { total_count: this.checkRuns.length, check_runs: runs });
+    if (route === `GET /commits/${this.pull.head.sha}/check-runs`) {
+      const listed = url.searchParams.get("filter") === "all" ? this.checkRuns : this.checkRuns.filter((run) => !this.earlierAttempt.has(run.id));
+      const runs = page(listed, url).map((run) => ({ ...recorded.checkRun, ...run }));
+      return jsonResponse(200, { total_count: listed.length, check_runs: runs });
     }
     if (route === "POST /check-runs") {
       const run = { id: this.nextId++, name: body.name, conclusion: body.conclusion, head_sha: body.head_sha };
@@ -103,22 +125,26 @@ export class FakeGitHub {
       labels?: string[];
       inputs?: Record<string, string>;
       eventFile?: unknown;
+      eventPr?: Record<string, unknown>;
+      apiUrl?: string;
     } = {},
   ) {
     const dir = mkdtempSync(join(tmpdir(), "bite-the-diff-"));
-    const paths = { event: join(dir, "event.json"), output: join(dir, "output"), summary: join(dir, "summary") };
+    const paths = { event: join(dir, "event.json"), output: join(dir, "output"), summary: join(dir, "summary"), preload: join(dir, "preload.js") };
     const labels = options.labels ?? [];
-    const pullRequest = {
-      ...recorded.event.pull_request,
+    this.pull = {
+      ...recorded.pull,
       number: PR_NUMBER,
-      head: { ...recorded.event.pull_request.head, sha: HEAD_SHA },
+      head: { ...recorded.pull.head, sha: HEAD_SHA },
       changed_files: this.files.length,
-      labels: labels.map((name) => ({ ...recorded.event.pull_request.labels[0], name })),
+      labels: labels.map((name) => ({ ...recorded.pull.labels[0], name })),
       ...options.prFields,
     };
+    const pullRequest = { ...recorded.event.pull_request, number: PR_NUMBER, ...options.eventPr };
     writeFileSync(paths.event, JSON.stringify(options.eventFile ?? { ...recorded.event, pull_request: pullRequest }));
     writeFileSync(paths.output, "");
     writeFileSync(paths.summary, "");
+    writeFileSync(paths.preload, PRELOAD);
 
     const inputs = {
       thresholds: "1000:comment\n3000:comment\n5000:fail\n",
@@ -128,10 +154,11 @@ export class FakeGitHub {
       token: "fake-token",
       ...options.inputs,
     };
-    const proc = Bun.spawn(["bun", "src/main.ts"], {
+    const proc = Bun.spawn(["bun", "--preload", paths.preload, "src/main.ts"], {
       env: {
         PATH: process.env.PATH,
-        GITHUB_API_URL: this.server.url.origin,
+        GITHUB_API_URL: options.apiUrl ?? this.server.url.origin,
+        FAKE_TIMEOUT_MS: this.hang ? "50" : "30000",
         GITHUB_REPOSITORY: "owner/repo",
         GITHUB_SHA: "merge-commit-sha",
         GITHUB_EVENT_PATH: paths.event,

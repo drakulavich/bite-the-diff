@@ -2,12 +2,17 @@
 set -euo pipefail
 name="$1" conclusion="$2" bucket="$3" text="${4-}"
 
-checks=$(gh pr checks "$PR") || true
-printf '%s\n' '--- gh pr checks' "$checks" '---'
-printf '%s\n' "$checks" | grep -F "$name"$'\t'"$bucket"$'\t'
+if [ "$GITHUB_RUN_ATTEMPT" -gt 1 ]; then
+  runs=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100&filter=all" \
+    --jq '.check_runs[] | select(.name | startswith("bite-the-diff ")) | .name + "=" + .conclusion' | sort -u)
+else
+  checks=$(gh pr checks "$PR") || true
+  printf '%s\n' '--- gh pr checks' "$checks" '---'
+  printf '%s\n' "$checks" | grep -F "$name"$'\t'"$bucket"$'\t'
 
-runs=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100" \
-  --jq '.check_runs[] | select(.name | startswith("bite-the-diff ")) | .name + "=" + .conclusion')
+  runs=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100" \
+    --jq '.check_runs[] | select(.name | startswith("bite-the-diff ")) | .name + "=" + .conclusion')
+fi
 printf 'check runs: %s\n' "$runs"
 test "$runs" = "$name=$conclusion"
 

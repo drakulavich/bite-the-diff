@@ -14,13 +14,13 @@ inputs:
     description: Comment when the PR changes this many files after exclude; never fails the job; 0 turns it off
     default: "50"
   exclude:
-    description: Globs of paths left out of the count, one per line
+    description: Globs of paths left out of the count, one per line, on top of the built-in lock files
     default: ""
   bypass-label:
     description: This label lets a PR past a fail threshold pass
     default: elefante
   token:
-    description: Needs pull-requests write and checks write
+    description: pull-requests write for the comment and checks write for the check run; without them the result stays in the job summary
     default: ${{ github.token }}
 outputs:
   lines:

@@ -13,6 +13,7 @@
 - **A red check from 5500 lines**: the `5000:fail` threshold plus its 10% tolerance
 - **A comment on many files**: from 50 files, and it never fails the job
 - **Stacks count per layer**: while a stacked PR's base is its parent branch, it counts only its own diff; for a parent's squash merge, see [Limits](#limits)
+- **Lock files left out**: well-known lock files in any folder do not count
 - **`elefante` for the diff that cannot be cut**: this label lets a PR past a `fail` threshold pass
 
 A PR of 1240 lines gets a `neutral` check run named `bite-the-diff 🟡 1240 lines` and this comment:
@@ -34,7 +35,37 @@ A PR of 1240 lines gets a `neutral` check run named `bite-the-diff 🟡 1240 lin
 
 ## Quick Start
 
-Add one workflow file:
+Add one step to a workflow that already runs on `pull_request`. The action works from the API alone, so it needs no checkout.
+
+```yaml
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: drakulavich/bite-the-diff@v1
+        timeout-minutes: 5
+      # your other steps
+```
+
+Job-level `permissions` replace the workflow's, so list what your other steps need too.
+
+- **Red tier:** past a `fail` threshold's tolerance the step fails the job and later steps are skipped, so put it first. To let a PR through, add the bypass label, then press Re-run: the action reads labels and the head commit from the API, so a re-run sees the label and writes to the live head.
+- **`continue-on-error: true`:** later steps run and the job is green, but the separate check run keeps the PR red when the token can write checks. A required check on that job then passes.
+- **No write permissions:** the result is only in the job summary and in warnings, which name the line to add, so there is no comment and no red check run. Tested on a public repo with `permissions: {}` and with read-only permissions.
+- **Under every threshold:** no comment and no check run.
+
+The step needs no `concurrency` block: 25 rounds of two quick pushes left one comment each.
+
+Lock files stay out of the count in any folder: `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`, `Cargo.lock`, `go.sum`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `composer.lock`, `Gemfile.lock`, `gradle.lockfile` and `buildscript-gradle.lockfile`. The list cannot be turned off. Recounted over real merged PRs, it moved few of them to a lower tier. Add your own paths, such as generated code, with `exclude`. `**/` matches a path at the root and in any folder; a bare `generated.ts` matches only the root. Deleted lines count, and so does a removed file.
+
+To make the limit binding, require the job, which fails only past a `fail` threshold's tolerance. The check run's name changes with the size, so it cannot be a required check.
+
+### A separate workflow, for a label that acts without a re-run
 
 ```yaml
 # .github/workflows/bite-the-diff.yml
@@ -44,30 +75,19 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
 concurrency:
   group: bite-the-diff-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  queue: max
 permissions:
   pull-requests: write
   checks: write
 jobs:
   bite-the-diff:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: drakulavich/bite-the-diff@v1
-        with:
-          exclude: |
-            **/bun.lock
-            **/package-lock.json
-            **/yarn.lock
-            **/pnpm-lock.yaml
-            **/Cargo.lock
-            **/generated/**
 ```
 
-Lock files and generated code count by default, so `exclude` lists them. `**/` matches a path at the root and in any folder; a bare `bun.lock` matches only the root. Deleted lines count, and so does a removed file.
-
-The action works from the API alone, so the job needs no checkout. `labeled` and `unlabeled` are in `types` so the check follows the bypass label. The `concurrency` block stops two runs racing to create the comment. GitHub keeps one pending run per group, so two or more labels added right after a PR opens can still leave a `CANCELLED` `bite-the-diff` check; it blocks nothing, and a Dependabot config that sets one label avoids it, unless the repo also has `major`, `minor` or `patch` labels.
-
-To make the limit binding, require the job (`bite-the-diff` in the workflow above), which fails only past a `fail` threshold's tolerance. The check run's name changes with the size, so it cannot be a required check.
+`labeled` and `unlabeled` make the check follow the bypass label. `concurrency` stops runs racing to create the comment: without it, three labels added at once left two comments in 5 of 5 tries. `queue: max` keeps up to 100 runs waiting, and three labels at once left none cancelled; without it GitHub keeps one pending run and two runs per PR ended `CANCELLED`. actionlint 1.7.12 rejects the key (`unexpected key "queue"`).
 
 ## Inputs
 
@@ -75,9 +95,9 @@ To make the limit binding, require the job (`bite-the-diff` in the workflow abov
 |---|---|---|
 | `thresholds` | `1000:comment`, `3000:comment`, `5000:fail`, one per line | Lines and action per threshold. A `fail` threshold has a 10% tolerance, rounded up: `5000:fail` goes red from 5500. `comment` thresholds have none |
 | `file-threshold` | `50` | Files that get a comment, counted after `exclude`. It never fails the job and the bypass label has no effect on it. `0` turns it off |
-| `exclude` | empty | Globs of paths left out of the count, one per line |
+| `exclude` | empty | Globs of paths left out of the count, one per line, on top of the built-in lock files |
 | `bypass-label` | `elefante` | This label lets a PR past a `fail` threshold pass |
-| `token` | `${{ github.token }}` | Needs `pull-requests: write` and `checks: write` |
+| `token` | `${{ github.token }}` | `pull-requests: write` for the comment and `checks: write` for the check run; without them the result stays in the job summary |
 
 Only the highest threshold reached applies: with `1000:fail` and `5000:comment`, 6000 lines only comment. The lowest `comment` threshold gets 🟡, every other soft status 🟠, and a `fail` without the label 🔴.
 
@@ -115,9 +135,12 @@ A PR has at most one comment from this action and a commit at most one check run
 ## Limits
 
 - **Forks**: PRs from forks are not supported. Their token is read-only, so there is no comment, and a fork PR over a `fail` threshold still fails its job, which can block a required check.
-- **3000 files**: `GET /pulls/{n}/files` lists at most 3000 files. Above that, the line and file counts are the PR's totals from the event, without `exclude`, and the comment says so.
+- **3000 files**: `GET /pulls/{n}/files` lists at most 3000 files. Above that, the line and file counts are the PR's totals, without `exclude`, lock files included, and the comment says so.
 - **A parent's squash merge**: a test on this repo's API, with a parent and a child of 600 lines each. Deleting the parent's branch, with `gh pr merge --squash --delete-branch` or with `DELETE /git/refs` after the merge, closed the child with no retarget; it could not be reopened and its base could not be changed. With the branch kept, the child stayed open on that branch and showed 600 lines. Retargeted by hand it showed 1200, its parent's lines included, and 600 again once rebased onto the squash commit. So retarget and rebase the child before you delete its parent's branch. GitHub's docs describe a retarget when the branch is deleted, which neither route did; the web button and the auto-delete setting were not tried.
-- **403**: if the token gets a 403 on writing or deleting the comment or on the check run, the action logs a warning and carries on, and a PR past a `fail` threshold's tolerance still fails its job.
+- **403**: if the token gets a 403 on writing or deleting the comment or on the check run, the action logs a warning that names the permission, adds it to the job summary and carries on, and a PR past a `fail` threshold's tolerance still fails its job.
+- **API failures**: each request has a 30 s timeout and 2 retries on 429, 5xx and network errors. Once those are spent, a failed read leaves a warning, no outputs and a green step, so an outage does not block a PR. A failed write leaves a warning, and a PR already counted past a `fail` threshold's tolerance still fails its job. A retried write that had in fact gone through can leave a second comment. A 401 and any other 4xx fail the job.
+- **Merge conflicts**: GitHub does not run `pull_request` workflows while a PR has a merge conflict, so the check waits until it is resolved.
+- **`ubuntu-slim`**: works, about 3-4 s slower than `ubuntu-latest` over 7 runs.
 
 ## Why it exists
 
