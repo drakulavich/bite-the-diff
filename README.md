@@ -48,7 +48,7 @@ jobs:
       checks: write
     steps:
       - uses: drakulavich/bite-the-diff@v1
-        timeout-minutes: 2
+        timeout-minutes: 5
       # your other steps
 ```
 
@@ -82,7 +82,7 @@ permissions:
 jobs:
   bite-the-diff:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     steps:
       - uses: drakulavich/bite-the-diff@v1
 ```
