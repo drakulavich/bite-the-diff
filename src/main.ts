@@ -39,6 +39,7 @@ class ApiError extends Error {
 
 const TIMEOUT_MS = 30_000;
 const RETRIES = 2;
+const deadline = AbortSignal.timeout(120_000);
 
 const input = (name: string) => (process.env[`INPUT_${name.toUpperCase()}`] ?? "").trim();
 const repoUrl = `${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}`;
@@ -55,11 +56,11 @@ async function attempt<T>(method: string, path: string, body: unknown): Promise<
         "x-github-api-version": "2022-11-28",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.any([AbortSignal.timeout(TIMEOUT_MS), deadline]),
     });
     if (res.ok) return (res.status === 204 ? undefined : await res.json()) as T;
   } catch (error) {
-    throw new ApiError(null, route, error instanceof Error ? error.message : error);
+    throw new ApiError(null, route, deadline.aborted ? "the 2-minute limit was reached" : error instanceof Error ? error.message : error);
   }
   throw new ApiError(res.status, route);
 }
@@ -69,7 +70,7 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
     try {
       return await attempt<T>(method, path, body);
     } catch (error) {
-      if (!(error instanceof ApiError && error.transient) || retry > RETRIES) throw error;
+      if (!(error instanceof ApiError && error.transient) || retry > RETRIES || deadline.aborted) throw error;
       await new Promise((resolve) => setTimeout(resolve, retry * 1000));
     }
   }

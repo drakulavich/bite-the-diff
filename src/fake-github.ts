@@ -15,7 +15,7 @@ const PRELOAD = `
 const realTimeout = AbortSignal.timeout.bind(AbortSignal);
 AbortSignal.timeout = (ms) => {
   console.error("timeout " + ms);
-  return realTimeout(Number(process.env.FAKE_TIMEOUT_MS));
+  return realTimeout(Number(process.env["FAKE_TIMEOUT_" + ms]));
 };
 const realSetTimeout = globalThis.setTimeout;
 globalThis.setTimeout = (callback, ms, ...rest) => {
@@ -44,6 +44,7 @@ export class FakeGitHub {
   deletedElsewhere = new Set<number>();
   failWith: { route: string; status: number; times?: number } | null = null;
   hang: string | null = null;
+  deadlineMs: number | null = null;
   private nextId = 1000;
   private pull: { head: { sha: string } } & Record<string, unknown> = recorded.pull;
   private server = Bun.serve({ port: 0, fetch: (req) => this.handle(req) });
@@ -158,7 +159,8 @@ export class FakeGitHub {
       env: {
         PATH: process.env.PATH,
         GITHUB_API_URL: options.apiUrl ?? this.server.url.origin,
-        FAKE_TIMEOUT_MS: this.hang ? "50" : "30000",
+        FAKE_TIMEOUT_30000: this.hang && this.deadlineMs === null ? "50" : "30000",
+        FAKE_TIMEOUT_120000: String(this.deadlineMs ?? 120_000),
         GITHUB_REPOSITORY: "owner/repo",
         GITHUB_SHA: "merge-commit-sha",
         GITHUB_EVENT_PATH: paths.event,
