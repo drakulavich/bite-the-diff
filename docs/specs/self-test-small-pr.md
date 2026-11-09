@@ -45,7 +45,7 @@ CI is the test. Two throwaway PRs on branches of this repository, closed after t
 
 ## Out of scope
 
-The action leaves well-known lock files out of its count, and the gate does not. A PR that changes `package.json` and `bun.lock` would pass the gate as 2 files and reach the self-test with 1 counted file. No such PR exists in this repository yet (no Dependabot PR so far); it gets its own issue.
+The action leaves well-known lock files out of its count, and the gate does not. A PR that changes `package.json` and `bun.lock` would pass the gate as 2 files and reach the self-test with 1 counted file. No such PR exists in this repository yet (no Dependabot PR so far); it is [#70](https://github.com/drakulavich/bite-the-diff/issues/70).
 
 ## Definition of Done
 
