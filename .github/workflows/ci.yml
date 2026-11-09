@@ -35,16 +35,26 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: read
     outputs:
       big-enough: ${{ steps.count.outputs.big-enough }}
     steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
       - id: count
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/${{ github.event.pull_request.number }}/files" --jq '.[] | .additions + .deletions' > counts
-          awk '{ lines += $1 } END { print "big-enough=" (lines >= 2 && NR >= 2 ? "true" : "false") }' counts >> "$GITHUB_OUTPUT"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/${{ github.event.pull_request.number }}/files" > "$RUNNER_TEMP/files.json"
+          bun -e 'import { countFiles, countLines } from "./src/core.ts"; const files = (await Bun.file(process.argv[1]).json()).flat(); console.log("big-enough=" + (countLines(files, []) >= 2 && countFiles(files, []) >= 2));' "$RUNNER_TEMP/files.json" >> "$GITHUB_OUTPUT"
 
   self-test:
     needs: pr-size
