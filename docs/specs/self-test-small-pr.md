@@ -21,7 +21,7 @@ The `files-only` step compares the action's `files` output with `gh pr diff "$PR
 Rejected:
 - Rewrite the assertions for 1 file and 1 line (singular names, a `1:fail` that stays inside its 10% tolerance). It means more branches in `self-test-assert.sh` for a case that a counted `dist/` removes.
 - Have the job add a throwaway second file. It needs a push to the PR branch from CI.
-- Gate on paths (`src/`, `dist/`, `action.yml`). A one-line `action.yml` change is still one file and 2 lines, and the plural assertions fail on it.
+- Gate on paths (`src/`, `dist/`, `action.yml`). It would send a one-line `action.yml` change (1 file, 2 lines) to the self-test, where the assertions that name `files` and expect 2 of them fail. The chosen design skips that PR instead, as it does today: a one-file `action.yml` change still runs only `check` and `dist`. None of the 9 code PRs so far was one.
 
 ## Commands
 
@@ -39,7 +39,7 @@ CI is the test. Two throwaway PRs on branches of this repository, closed after t
 
 ## Boundaries
 
-- Always: the gate and the self-test steps count the same files.
+- Always: the gate and the self-test steps count the same files, except the lock files the action leaves out (see Out of scope).
 - Ask first: any change to `self-test-assert.sh` or to the action's own code.
 - Never: merge a throwaway PR.
 
