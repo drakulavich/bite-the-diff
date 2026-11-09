@@ -52,5 +52,10 @@ The action leaves well-known lock files out of its count, and the gate does not.
 - [ ] `grep -c 'exclude: dist/\*\*' .github/workflows/ci.yml` prints `0` (today `8`).
 - [ ] The `pr-size` jq no longer selects on `dist/` (today line 46 does).
 - [ ] On the `src/core.ts` throwaway PR, `self-test` and `self-test-read-only` run and pass: CI run linked in the PR.
-- [ ] On the `README.md` throwaway PR, `pr-size` sets `big-enough=false`, both self-tests are skipped and the run is green: CI run linked in the PR.
 - [ ] On the implementation PR itself, both self-tests run and pass.
+
+## Must still hold
+
+This passes today and guards against the change running the self-test where its assertions cannot hold. It fails if the new gate counts a one-file README edit as big enough.
+
+- [ ] On the `README.md` throwaway PR, `pr-size` sets `big-enough=false`, both self-tests are skipped and the run is green: CI run linked in the PR.
