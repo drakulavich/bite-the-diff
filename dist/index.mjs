@@ -1805,7 +1805,7 @@ function decide(lines, thresholds, hasBypassLabel) {
       redFrom: null
     };
   }
-  const redFrom = Math.ceil(reached.lines * 11 / 10);
+  const redFrom = Math.ceil(11 * reached.lines / 10);
   if (reached.action === "fail" && lines < redFrom) {
     return {
       lines,
