@@ -124,7 +124,7 @@ Everything else counts, deleted lines and removed files included.
 A step in an existing workflow needs no `concurrency` block. This workflow runs on label events too, and it needs one:
 
 ```yaml
-# .github/workflows/bite-the-diff.yml
+# .github/workflows/bite-the-diff.yml 
 name: bite-the-diff
 on:
   pull_request:
