@@ -14,7 +14,7 @@ Who gains: whoever merges a one-line fix to the action, who today gets green CI 
 
 `dist/` counts everywhere in CI. The `pr-size` gate counts every changed file and its lines, and the self-test steps drop `exclude: dist/**`, so the gate and the steps count the same thing. A source change always comes with its rebuilt `dist/index.mjs` (the `dist` job fails otherwise), so it is at least 2 files and, for a changed line, at least 2 lines (one added, one deleted). Every assertion then has the plural names and the 2 lines it needs, and none of them changes.
 
-The `files-only` step compares the action's `files` output with `gh pr diff "$PR" --name-only | grep -vc '^dist/'`. That becomes `gh pr diff "$PR" --name-only | wc -l`.
+The `files-only` step compares the action's `files` output with `gh pr diff "$PR" --name-only | grep -vc '^dist/'`. That becomes `gh pr diff "$PR" --name-only | grep -c .`, which prints a bare number on any runner.
 
 `exclude` stays covered by its unit tests (`exclude` appears on 15 lines of `src/core.test.ts` and 15 of `src/main.test.ts`). It loses its run against a real PR in CI.
 
