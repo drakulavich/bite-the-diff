@@ -1,0 +1,30 @@
+name: tmp-others
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+jobs:
+  bot-adds:
+    if: github.event.action == 'labeled' && github.event.label.name == 'tmp-others-bot'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - run: gh api "repos/$GITHUB_REPOSITORY/issues/${{ github.event.pull_request.number }}/labels" -f 'labels[]=tmp-others'
+  bite:
+    if: github.event.label.name != 'tmp-others-bot'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: ./
+        with:
+          thresholds: 1:fail
+          bypass-label: tmp-others
+          bypass-by: others
