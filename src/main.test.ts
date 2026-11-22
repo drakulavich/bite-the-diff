@@ -520,14 +520,19 @@ describe("a re-run: the event keeps what it held at the first attempt, the API h
 });
 
 describe("bypass-by others: the label counts only when someone other than the PR author added it", () => {
-  const AUTHOR = { login: "alice" };
-  const labeled = (login: string, name = LABEL) => ({ event: "labeled", actor: { login, type: "User" }, label: { name } });
-  const unlabeled = (login: string) => ({ event: "unlabeled", actor: { login, type: "User" }, label: { name: LABEL } });
+  const AUTHOR = { login: "alice", id: 1 };
+  const BOB = { login: "bob", id: 2 };
+  const labeled = (actor: { login: string; id: number } | null, name = LABEL) => ({
+    event: "labeled",
+    actor: actor && { ...actor, type: "User" },
+    label: { name },
+  });
+  const unlabeled = (actor: { login: string; id: number }) => ({ event: "unlabeled", actor: { ...actor, type: "User" }, label: { name: LABEL } });
   const others = { prFields: { user: AUTHOR }, labels: [LABEL], inputs: { "bypass-by": "others" } };
 
   test("added by the author: red, and the comment and check run say who has to add it", async () => {
     github.files = sized(5600);
-    github.events = [labeled("alice"), labeled("bob", "docs")];
+    github.events = [labeled(AUTHOR), labeled(BOB, "docs")];
     const result = await github.runAction(others);
     expect(result.exitCode).toBe(1);
     expect(result.output).toBe("lines=5600\nlevel=fail\nfiles=1\n");
@@ -543,7 +548,7 @@ describe("bypass-by others: the label counts only when someone other than the PR
 
   test("added by another user: green, and the check run is orange as with the label today", async () => {
     github.files = sized(5600);
-    github.events = [labeled("bob")];
+    github.events = [labeled(BOB)];
     const result = await github.runAction(others);
     expect(result.exitCode).toBe(0);
     expect(github.requests).toContain("GET /issues/42/events?per_page=100&page=1");
@@ -553,7 +558,7 @@ describe("bypass-by others: the label counts only when someone other than the PR
 
   test("added by the author, removed, then added by another user: the latest adding counts", async () => {
     github.files = sized(5600);
-    github.events = [labeled("alice"), unlabeled("alice"), labeled("bob")];
+    github.events = [labeled(AUTHOR), unlabeled(AUTHOR), labeled(BOB)];
     const result = await github.runAction(others);
     expect(result.exitCode).toBe(0);
     expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🟠 5600 lines", "neutral"]]);
@@ -561,8 +566,8 @@ describe("bypass-by others: the label counts only when someone other than the PR
 
   test("the latest adding is found on a later page", async () => {
     github.files = sized(5600);
-    const filler = Array.from({ length: 148 }, () => ({ event: "referenced", actor: { login: "bob", type: "User" } }));
-    github.events = [labeled("bob"), ...filler, labeled("alice")];
+    const filler = Array.from({ length: 148 }, () => ({ event: "referenced", actor: { ...BOB, type: "User" } }));
+    github.events = [labeled(BOB), ...filler, labeled(AUTHOR)];
     const result = await github.runAction(others);
     expect(result.exitCode).toBe(1);
     expect(github.requests).toContain("GET /issues/42/events?per_page=100&page=2");
@@ -571,7 +576,7 @@ describe("bypass-by others: the label counts only when someone other than the PR
 
   test("events the token cannot read: the label does not count, and the warning names the permission", async () => {
     github.files = sized(5600);
-    github.events = [labeled("bob")];
+    github.events = [labeled(BOB)];
     github.failWith = { route: "GET /issues/42/events", status: 403 };
     const result = await github.runAction(others);
     const problem = `bite-the-diff could not read who added the label \`${LABEL}\`: the token got a 403. Add \`issues: read\` to the job's permissions. The label does not count.`;
@@ -581,9 +586,44 @@ describe("bypass-by others: the label counts only when someone other than the PR
     expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
   });
 
+  test("added by the author under a login in another case: the ids match, so it is red", async () => {
+    github.files = sized(5600);
+    github.events = [labeled({ login: "alice", id: 1 })];
+    const result = await github.runAction({ ...others, prFields: { user: { login: "Alice", id: 1 } } });
+    expect(result.exitCode).toBe(1);
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
+  });
+
+  test("added by a deleted user, an event with no actor: the label does not count, and the report is still written", async () => {
+    github.files = sized(5600);
+    github.events = [labeled(null)];
+    const result = await github.runAction(others);
+    expect(result.exitCode).toBe(1);
+    expect(result.summary).toBe("bite-the-diff: 5600 lines, level fail.\n");
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
+    expect(github.comments[0]!.body).toContain("🔴 **5600 lines.** Too much elephant: this check stays red (threshold: 5000).");
+  });
+
+  test("an event with no actor under the thresholds: green, no error", async () => {
+    github.files = sized(40);
+    github.events = [labeled(null)];
+    const result = await github.runAction(others);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.output).toBe("lines=40\nlevel=none\nfiles=1\n");
+  });
+
+  test("a PR whose author account was deleted, with no user: the label does not count", async () => {
+    github.files = sized(5600);
+    github.events = [labeled(BOB)];
+    const result = await github.runAction({ ...others, prFields: { user: null } });
+    expect(result.exitCode).toBe(1);
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
+  });
+
   test("bypass-by anyone, the default: a label the author added counts, and no events are read", async () => {
     github.files = sized(5600);
-    github.events = [labeled("alice")];
+    github.events = [labeled(AUTHOR)];
     const result = await github.runAction({ prFields: { user: AUTHOR }, labels: [LABEL] });
     expect(result.exitCode).toBe(0);
     expect(github.requests.filter((r) => r.includes("/events"))).toEqual([]);

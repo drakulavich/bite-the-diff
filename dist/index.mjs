@@ -2009,7 +2009,8 @@ async function addedByOthers(pr, label) {
   try {
     const events = await Array.fromAsync(pages(`/issues/${pr.number}/events`));
     const latest = events.findLast((event) => event.event === "labeled" && event.label?.name === label);
-    return latest !== undefined && latest.actor.login !== pr.user.login;
+    const adder = latest?.actor;
+    return adder != null && pr.user !== null && adder.id !== pr.user.id;
   } catch (error) {
     if (!(error instanceof ApiError))
       throw error;

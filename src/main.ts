@@ -23,7 +23,7 @@ type PullRequest = {
   additions: number;
   deletions: number;
   labels: { name: string }[];
-  user: { login: string };
+  user: { id: number } | null;
   head: { sha: string };
 };
 
@@ -150,13 +150,14 @@ async function warnOnWriteFailure(what: string, permission: string, changed: str
   }
 }
 
-type IssueEvent = { event: string; actor: { login: string }; label?: { name: string } };
+type IssueEvent = { event: string; actor: { id: number } | null; label?: { name: string } };
 
 async function addedByOthers(pr: PullRequest, label: string): Promise<boolean> {
   try {
     const events = await Array.fromAsync(pages<IssueEvent>(`/issues/${pr.number}/events`));
     const latest = events.findLast((event) => event.event === "labeled" && event.label?.name === label);
-    return latest !== undefined && latest.actor.login !== pr.user.login;
+    const adder = latest?.actor;
+    return adder != null && pr.user !== null && adder.id !== pr.user.id;
   } catch (error) {
     if (!(error instanceof ApiError)) throw error;
     const reason = error.status === 403 ? "the token got a 403. Add `issues: read` to the job's permissions." : `${error.message}.`;

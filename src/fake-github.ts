@@ -4,7 +4,7 @@ import { join } from "node:path";
 import recorded from "./fixtures/recorded.json";
 
 export type FileSpec = { filename: string; additions: number; deletions: number };
-export type IssueEvent = { event: string; actor: { login: string; type: string }; label?: { name: string } };
+export type IssueEvent = { event: string; actor: { login: string; id: number; type: string } | null; label?: { name: string } };
 
 const PR_NUMBER = 42;
 export const HEAD_SHA = "aaaa1111";
@@ -83,7 +83,7 @@ export class FakeGitHub {
           ...recorded.issueEvent,
           label: undefined,
           ...event,
-          actor: { ...recorded.issueEvent.actor, ...event.actor },
+          actor: event.actor && { ...recorded.issueEvent.actor, ...event.actor },
         })),
       );
     }
