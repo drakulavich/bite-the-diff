@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { FakeGitHub, HEAD_SHA } from "./fake-github.ts";
+import { FakeGitHub, HEAD_SHA, type IssueEvent } from "./fake-github.ts";
 
 const MARKER = "<!-- bite-the-diff -->";
 const LABEL = "elefante";
@@ -594,15 +594,25 @@ describe("bypass-by others: the label counts only when someone other than the PR
     expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
   });
 
-  test("added by a deleted user, an event with no actor: the label does not count, and the report is still written", async () => {
-    github.files = sized(5600);
-    github.events = [labeled(null)];
-    const result = await github.runAction(others);
-    expect(result.exitCode).toBe(1);
-    expect(result.summary).toBe("bite-the-diff: 5600 lines, level fail.\n");
-    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
-    expect(github.comments[0]!.body).toContain("🔴 **5600 lines.** Too much elephant: this check stays red (threshold: 5000).");
-  });
+  const rows: { shape: string; actor: unknown; user: unknown }[] = [
+    { shape: "an event with no actor", actor: null, user: AUTHOR },
+    { shape: "an actor without an id", actor: { login: "bob", id: undefined, type: "User" }, user: AUTHOR },
+    { shape: "an actor id of null", actor: { login: "bob", id: null, type: "User" }, user: AUTHOR },
+    { shape: "an actor id as a string", actor: { login: "bob", id: "2", type: "User" }, user: AUTHOR },
+    { shape: "an author without an id", actor: { ...BOB, type: "User" }, user: { login: "alice" } },
+    { shape: "a PR with no user", actor: { ...BOB, type: "User" }, user: null },
+  ];
+  for (const row of rows) {
+    test(`${row.shape}: the adder is not known to be someone else, so the label does not count and the report is written`, async () => {
+      github.files = sized(5600);
+      github.events = [{ event: "labeled", actor: row.actor as IssueEvent["actor"], label: { name: LABEL } }];
+      const result = await github.runAction({ ...others, prFields: { user: row.user } });
+      expect(result.exitCode).toBe(1);
+      expect(result.summary).toBe("bite-the-diff: 5600 lines, level fail.\n");
+      expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
+      expect(github.comments[0]!.body).toContain("🔴 **5600 lines.** Too much elephant: this check stays red (threshold: 5000).");
+    });
+  }
 
   test("an event with no actor under the thresholds: green, no error", async () => {
     github.files = sized(40);
@@ -611,14 +621,6 @@ describe("bypass-by others: the label counts only when someone other than the PR
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
     expect(result.output).toBe("lines=40\nlevel=none\nfiles=1\n");
-  });
-
-  test("a PR whose author account was deleted, with no user: the label does not count", async () => {
-    github.files = sized(5600);
-    github.events = [labeled(BOB)];
-    const result = await github.runAction({ ...others, prFields: { user: null } });
-    expect(result.exitCode).toBe(1);
-    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
   });
 
   test("bypass-by anyone, the default: a label the author added counts, and no events are read", async () => {
