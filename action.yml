@@ -19,6 +19,9 @@ inputs:
   bypass-label:
     description: This label lets a PR past a fail threshold pass
     default: elefante
+  bypass-by:
+    description: Who can add the bypass label, anyone or others, meaning anyone but the PR author; others reads the PR's events and needs issues read
+    default: anyone
   token:
     description: pull-requests write for the comment and checks write for the check run; without them the result stays in the job summary
     default: ${{ github.token }}

@@ -1784,6 +1784,11 @@ function parseFileThreshold(text) {
     throw new Error(`Bad file-threshold: ${text}`);
   return Number(text);
 }
+function parseBypassBy(text) {
+  if (text !== "anyone" && text !== "others")
+    throw new Error(`Bad bypass-by: ${text}`);
+  return text;
+}
 function countFiles(files, exclude) {
   return included(files, exclude).length;
 }
@@ -1844,15 +1849,19 @@ function withFileThreshold(decision, files, fileThreshold) {
   }
   return { ...decision, checkName: `${decision.checkName}, ${plural(files, "file")}`, filesOver };
 }
-function commentBody(decision, { bypassLabel, cappedFiles }) {
+function commentBody(decision, { bypassLabel, bypassBy = "anyone", cappedFiles }) {
   const { lines, threshold, icon, level, bypassed, redFrom, filesOver } = decision;
   const reachedFail = level === "fail";
   const count = `**${plural(lines, "line")}.**`;
   const headline = filesOver && threshold === null ? `${icon} **${plural(filesOver.files, "file")}.** A lot of elephant to chew at once (threshold: ${filesOver.threshold}).` : redFrom !== null ? `${icon} ${count} Almost too much elephant: red from ${redFrom} (threshold: ${threshold}).` : bypassed ? `\uD83D\uDC18 ${count} The \`${bypassLabel}\` label let this one through whole.` : reachedFail ? `${icon} ${count} Too much elephant: this check stays red (threshold: ${threshold}).` : icon === "\uD83D\uDFE1" ? `${icon} ${count} That's a lot of elephant for one bite (threshold: ${threshold}).` : `${icon} ${count} Bigger than one bite should be (threshold: ${threshold}).`;
   const alsoFiles = filesOver && threshold !== null ? [`Also ${plural(filesOver.files, "file")} (threshold: ${filesOver.threshold}).`] : [];
-  const labelHint = reachedFail && !bypassed ? ["", `Can't be cut? Add the label \`${bypassLabel}\`.`] : [];
+  const labelHint = reachedFail && !bypassed ? [
+    "",
+    bypassBy === "others" ? `Can't be cut? Someone other than the PR author has to add the label \`${bypassLabel}\`.` : `Can't be cut? Add the label \`${bypassLabel}\`.`
+  ] : [];
   const capped = cappedFiles === null ? [] : [`This PR has ${cappedFiles} changed files and the API lists ${MAX_LISTED_FILES}, so the count is the PR total and \`exclude\` was not applied.`, ""];
-  const leaveWhole = reachedFail ? `add the path to \`exclude\` or add the label \`${bypassLabel}\`` : "add the path to `exclude`";
+  const addLabel = bypassBy === "others" ? "have someone other than the PR author add" : "add";
+  const leaveWhole = reachedFail ? `add the path to \`exclude\` or ${addLabel} the label \`${bypassLabel}\`` : "add the path to `exclude`";
   return [
     MARKER,
     headline,
@@ -1947,7 +1956,7 @@ async function deleteComment(id) {
       throw error;
   }
 }
-async function updateComment(pr, decision, capped) {
+async function updateComment(pr, decision, capped, bypassBy) {
   const existing = await findFirst(pages(`/issues/${pr.number}/comments`), (comment) => comment.body.startsWith(MARKER));
   if (decision.level === "none") {
     if (existing)
@@ -1956,6 +1965,7 @@ async function updateComment(pr, decision, capped) {
   }
   const body = commentBody(decision, {
     bypassLabel: input("bypass-label"),
+    bypassBy,
     cappedFiles: capped ? pr.changed_files : null
   });
   if (existing)
@@ -1963,16 +1973,17 @@ async function updateComment(pr, decision, capped) {
   else
     await api("POST", `/issues/${pr.number}/comments`, { body });
 }
-async function updateCheckRun(pr, decision) {
+async function updateCheckRun(pr, decision, bypassBy) {
   const listed = await Array.fromAsync(pages(`/commits/${pr.head.sha}/check-runs`, (page) => page.check_runs, "&filter=all"));
   const existing = listed.filter((run) => run.name.startsWith(CHECK_PREFIX));
+  const whoAdds = decision.failsJob && bypassBy === "others" ? ` The label \`${input("bypass-label")}\` counts only when someone other than the PR author adds it.` : "";
   const fields = {
     name: decision.checkName,
     status: "completed",
     conclusion: decision.conclusion,
     output: {
       title: size(decision),
-      summary: `Threshold reached: ${decision.threshold ?? "none"}.${decision.filesOver ? ` File threshold reached: ${decision.filesOver.threshold}.` : ""}`
+      summary: `Threshold reached: ${decision.threshold ?? "none"}.${decision.filesOver ? ` File threshold reached: ${decision.filesOver.threshold}.` : ""}${whoAdds}`
     }
   };
   for (const run of existing)
@@ -1994,6 +2005,21 @@ async function warnOnWriteFailure(what, permission, changed, write) {
     report(problem);
   }
 }
+async function addedByOthers(pr, label) {
+  try {
+    const events = await Array.fromAsync(pages(`/issues/${pr.number}/events`));
+    const latest = events.findLast((event) => event.event === "labeled" && event.label?.name === label);
+    return latest !== undefined && latest.actor.login !== pr.user.login;
+  } catch (error) {
+    if (!(error instanceof ApiError))
+      throw error;
+    const reason = error.status === 403 ? "the token got a 403. Add `issues: read` to the job's permissions." : `${error.message}.`;
+    const problem = `bite-the-diff could not read who added the label \`${label}\`: ${reason} The label does not count.`;
+    console.log(`::warning::${problem}`);
+    report(problem);
+    return false;
+  }
+}
 async function readPull(number) {
   const pr = await api("GET", `/pulls/${number}`);
   const capped = pr.changed_files > MAX_LISTED_FILES;
@@ -2005,6 +2031,7 @@ async function run() {
     throw new Error("bite-the-diff runs on pull_request events");
   const thresholds = parseThresholds(input("thresholds"));
   const fileThreshold = parseFileThreshold(input("file-threshold"));
+  const bypassBy = parseBypassBy(input("bypass-by"));
   const exclude = input("exclude").split(`
 `).map((glob) => glob.trim()).filter(Boolean);
   let pull;
@@ -2021,14 +2048,16 @@ async function run() {
   const { pr, capped, listed } = pull;
   const lines = listed ? countLines(listed, exclude) : pr.additions + pr.deletions;
   const files = listed ? countFiles(listed, exclude) : pr.changed_files;
-  const decision = withFileThreshold(decide(lines, thresholds, pr.labels.some((label) => label.name === input("bypass-label"))), files, fileThreshold);
+  const labeled = pr.labels.some((label) => label.name === input("bypass-label"));
+  const bypass = labeled && (bypassBy === "anyone" || await addedByOthers(pr, input("bypass-label")));
+  const decision = withFileThreshold(decide(lines, thresholds, bypass), files, fileThreshold);
   appendFileSync(process.env.GITHUB_OUTPUT, `lines=${lines}
 level=${decision.level}
 files=${files}
 `);
   report(`bite-the-diff: ${size(decision)}, level ${decision.level}.`);
-  await warnOnWriteFailure("comment", "pull-requests: write", size(decision), () => updateComment(pr, decision, capped));
-  await warnOnWriteFailure("check run", "checks: write", size(decision), () => updateCheckRun(pr, decision));
+  await warnOnWriteFailure("comment", "pull-requests: write", size(decision), () => updateComment(pr, decision, capped, bypassBy));
+  await warnOnWriteFailure("check run", "checks: write", size(decision), () => updateCheckRun(pr, decision, bypassBy));
   if (decision.failsJob) {
     console.log(`::error::This PR changes ${plural(lines, "line")}, past the failing threshold of ${decision.threshold}.`);
     process.exitCode = 1;

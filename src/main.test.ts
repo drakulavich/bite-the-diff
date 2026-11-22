@@ -519,6 +519,78 @@ describe("a re-run: the event keeps what it held at the first attempt, the API h
   });
 });
 
+describe("bypass-by others: the label counts only when someone other than the PR author added it", () => {
+  const AUTHOR = { login: "alice" };
+  const labeled = (login: string, name = LABEL) => ({ event: "labeled", actor: { login, type: "User" }, label: { name } });
+  const unlabeled = (login: string) => ({ event: "unlabeled", actor: { login, type: "User" }, label: { name: LABEL } });
+  const others = { prFields: { user: AUTHOR }, labels: [LABEL], inputs: { "bypass-by": "others" } };
+
+  test("added by the author: red, and the comment and check run say who has to add it", async () => {
+    github.files = sized(5600);
+    github.events = [labeled("alice"), labeled("bob", "docs")];
+    const result = await github.runAction(others);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toBe("lines=5600\nlevel=fail\nfiles=1\n");
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
+    expect(github.checkOutputs.at(-1)!.summary).toBe(
+      `Threshold reached: 5000. The label \`${LABEL}\` counts only when someone other than the PR author adds it.`,
+    );
+    expect(github.comments[0]!.body).toContain(
+      `🔴 **5600 lines.** Too much elephant: this check stays red (threshold: 5000).\n\nCan't be cut? Someone other than the PR author has to add the label \`${LABEL}\`.`,
+    );
+    expect(github.comments[0]!.body).toContain(`add the path to \`exclude\` or have someone other than the PR author add the label \`${LABEL}\`.`);
+  });
+
+  test("added by another user: green, and the check run is orange as with the label today", async () => {
+    github.files = sized(5600);
+    github.events = [labeled("bob")];
+    const result = await github.runAction(others);
+    expect(result.exitCode).toBe(0);
+    expect(github.requests).toContain("GET /issues/42/events?per_page=100&page=1");
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🟠 5600 lines", "neutral"]]);
+    expect(github.comments[0]!.body).toContain(`🐘 **5600 lines.** The \`${LABEL}\` label let this one through whole.`);
+  });
+
+  test("added by the author, removed, then added by another user: the latest adding counts", async () => {
+    github.files = sized(5600);
+    github.events = [labeled("alice"), unlabeled("alice"), labeled("bob")];
+    const result = await github.runAction(others);
+    expect(result.exitCode).toBe(0);
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🟠 5600 lines", "neutral"]]);
+  });
+
+  test("the latest adding is found on a later page", async () => {
+    github.files = sized(5600);
+    const filler = Array.from({ length: 148 }, () => ({ event: "referenced", actor: { login: "bob", type: "User" } }));
+    github.events = [labeled("bob"), ...filler, labeled("alice")];
+    const result = await github.runAction(others);
+    expect(result.exitCode).toBe(1);
+    expect(github.requests).toContain("GET /issues/42/events?per_page=100&page=2");
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
+  });
+
+  test("events the token cannot read: the label does not count, and the warning names the permission", async () => {
+    github.files = sized(5600);
+    github.events = [labeled("bob")];
+    github.failWith = { route: "GET /issues/42/events", status: 403 };
+    const result = await github.runAction(others);
+    const problem = `bite-the-diff could not read who added the label \`${LABEL}\`: the token got a 403. Add \`issues: read\` to the job's permissions. The label does not count.`;
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(`::warning::${problem}\n`);
+    expect(result.summary).toBe(`${problem}\nbite-the-diff: 5600 lines, level fail.\n`);
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🔴 5600 lines", "failure"]]);
+  });
+
+  test("bypass-by anyone, the default: a label the author added counts, and no events are read", async () => {
+    github.files = sized(5600);
+    github.events = [labeled("alice")];
+    const result = await github.runAction({ prFields: { user: AUTHOR }, labels: [LABEL] });
+    expect(result.exitCode).toBe(0);
+    expect(github.requests.filter((r) => r.includes("/events"))).toEqual([]);
+    expect(github.checkRuns.map((run) => [run.name, run.conclusion])).toEqual([["bite-the-diff 🟠 5600 lines", "neutral"]]);
+  });
+});
+
 describe("API failures", () => {
   test("a 403 on the comment warns, still writes the check run, and the job stays green", async () => {
     github.forbid.add("comments");
@@ -1004,6 +1076,13 @@ describe("bad configuration", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("::error::Bad threshold: lots:comment");
   });
+
+  test("a bad bypass-by fails the run before any API call", async () => {
+    const result = await github.runAction({ inputs: { "bypass-by": "reviewers" } });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("::error::Bad bypass-by: reviewers");
+    expect(github.requests).toEqual([]);
+  });
 });
 
 test("the token from the input is sent", async () => {
@@ -1014,7 +1093,14 @@ test("the token from the input is sent", async () => {
 type ActionInput = { default: string };
 type ActionYml = {
   runs: unknown;
-  inputs: { thresholds: ActionInput; "file-threshold": ActionInput; "bypass-label": ActionInput; token: ActionInput; exclude: ActionInput };
+  inputs: {
+    thresholds: ActionInput;
+    "file-threshold": ActionInput;
+    "bypass-label": ActionInput;
+    "bypass-by": ActionInput;
+    token: ActionInput;
+    exclude: ActionInput;
+  };
   outputs: object;
 };
 
@@ -1024,6 +1110,7 @@ test("action.yml declares what the spec says", async () => {
   expect(action.inputs.thresholds.default).toBe("1000:comment\n3000:comment\n5000:fail\n");
   expect(action.inputs["file-threshold"].default).toBe("50");
   expect(action.inputs["bypass-label"].default).toBe(LABEL);
+  expect(action.inputs["bypass-by"].default).toBe("anyone");
   expect(action.inputs.token.default).toBe(`\${{ github.token }}`);
   expect(action.inputs.exclude.default).toBe("");
   expect(Object.keys(action.outputs)).toEqual(["lines", "level", "files"]);
