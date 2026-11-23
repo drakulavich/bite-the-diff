@@ -71,6 +71,7 @@ With the default thresholds:
 | 5000 to 5499 | created or updated, says where red starts; the bypass label has no effect | `neutral`, `bite-the-diff 🟠 5200 lines` | green |
 | 5500 or more | created or updated, names the bypass label | `failure`, `bite-the-diff 🔴 5600 lines` | red |
 | 5500 or more, with the bypass label | created or updated, says the label let it pass | `neutral`, `bite-the-diff 🟠 5600 lines` | green |
+| 5500 or more, `bypass-by: others`, the label added by the PR author | created or updated, says someone other than the PR author has to add the label | `failure`, `bite-the-diff 🔴 5600 lines` | red |
 
 The default file threshold adds to that table:
 
@@ -91,6 +92,7 @@ A PR has at most one comment from this action and a commit at most one check run
 | `file-threshold` | `50` | Files that get a comment, counted after `exclude`. It never fails the job and the bypass label has no effect on it. `0` turns it off |
 | `exclude` | empty | Globs of paths left out of the count, one per line, on top of the built-in lock files |
 | `bypass-label` | `elefante` | This label lets a PR past a `fail` threshold pass |
+| `bypass-by` | `anyone` | Who can add the bypass label. `others`: the label counts only when its latest adding, in the PR's events, was by someone other than the PR author; a bot or an app counts as someone else. It needs `issues: read` |
 | `token` | `${{ github.token }}` | `pull-requests: write` for the comment and `checks: write` for the check run; without them the result stays in the job summary |
 
 Only the highest threshold reached applies: with `1000:fail` and `5000:comment`, 6000 lines only comment. The lowest `comment` threshold gets 🟡, every other soft status 🟠, and a `fail` without the label 🔴. Set `thresholds` lower if your reviews slow down on PRs under the defaults.
@@ -115,6 +117,7 @@ Everything else counts, deleted lines and removed files included.
 ### How it reports, and how to make it binding
 
 - **Job summary**: always gets one line with the count and the level.
+- **`bypass-by: others`**: needs `issues: read` to read who added the label. Without it the label does not count, and a warning names the permission.
 - **Without write permissions**: without `pull-requests: write` there is no comment, and without `checks: write` no check run. The result then stays in the job summary and in a warning that names the permission to add. A PR past a `fail` threshold still fails its job. This was tried on public repos only.
 - **`continue-on-error: true`**: later steps run and the job is green, but the check run keeps the PR red when the token can write checks. A required check on that job then passes.
 - **A binding limit**: require the job, which fails only past a `fail` threshold. The check run's name changes with the size, so it cannot be a required check.

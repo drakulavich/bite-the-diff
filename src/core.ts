@@ -26,6 +26,7 @@ export type PrFile = { filename: string; additions: number; deletions: number };
 type Action = "comment" | "fail";
 export type Threshold = { lines: number; action: Action };
 type FilesOver = { files: number; threshold: number };
+export type BypassBy = "anyone" | "others";
 
 export type Decision = {
   lines: number;
@@ -64,6 +65,11 @@ function included(files: PrFile[], exclude: string[]): PrFile[] {
 export function parseFileThreshold(text: string): number {
   if (!/^\d+$/.test(text)) throw new Error(`Bad file-threshold: ${text}`);
   return Number(text);
+}
+
+export function parseBypassBy(text: string): BypassBy {
+  if (text !== "anyone" && text !== "others") throw new Error(`Bad bypass-by: ${text}`);
+  return text;
 }
 
 export function countFiles(files: PrFile[], exclude: string[]): number {
@@ -134,7 +140,10 @@ export function withFileThreshold(decision: Decision, files: number, fileThresho
   return { ...decision, checkName: `${decision.checkName}, ${plural(files, "file")}`, filesOver };
 }
 
-export function commentBody(decision: Decision, { bypassLabel, cappedFiles }: { bypassLabel: string; cappedFiles: number | null }): string {
+export function commentBody(
+  decision: Decision,
+  { bypassLabel, bypassBy = "anyone", cappedFiles }: { bypassLabel: string; bypassBy?: BypassBy; cappedFiles: number | null },
+): string {
   const { lines, threshold, icon, level, bypassed, redFrom, filesOver } = decision;
   const reachedFail = level === "fail";
   const count = `**${plural(lines, "line")}.**`;
@@ -154,14 +163,23 @@ export function commentBody(decision: Decision, { bypassLabel, cappedFiles }: { 
 
   const alsoFiles = filesOver && threshold !== null ? [`Also ${plural(filesOver.files, "file")} (threshold: ${filesOver.threshold}).`] : [];
 
-  const labelHint = reachedFail && !bypassed ? ["", `Can't be cut? Add the label \`${bypassLabel}\`.`] : [];
+  const labelHint =
+    reachedFail && !bypassed
+      ? [
+          "",
+          bypassBy === "others"
+            ? `Can't be cut? Someone other than the PR author has to add the label \`${bypassLabel}\`.`
+            : `Can't be cut? Add the label \`${bypassLabel}\`.`,
+        ]
+      : [];
 
   const capped =
     cappedFiles === null
       ? []
       : [`This PR has ${cappedFiles} changed files and the API lists ${MAX_LISTED_FILES}, so the count is the PR total and \`exclude\` was not applied.`, ""];
 
-  const leaveWhole = reachedFail ? `add the path to \`exclude\` or add the label \`${bypassLabel}\`` : "add the path to `exclude`";
+  const addLabel = bypassBy === "others" ? "have someone other than the PR author add" : "add";
+  const leaveWhole = reachedFail ? `add the path to \`exclude\` or ${addLabel} the label \`${bypassLabel}\`` : "add the path to `exclude`";
 
   return [
     MARKER,

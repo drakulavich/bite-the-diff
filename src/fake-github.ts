@@ -4,6 +4,7 @@ import { join } from "node:path";
 import recorded from "./fixtures/recorded.json";
 
 export type FileSpec = { filename: string; additions: number; deletions: number };
+export type IssueEvent = { event: string; actor: { login: string; id?: unknown; type: string } | null; label?: { name: string } };
 
 const PR_NUMBER = 42;
 export const HEAD_SHA = "aaaa1111";
@@ -35,6 +36,7 @@ function page<T>(items: T[], url: URL): T[] {
 export class FakeGitHub {
   files: FileSpec[] = [];
   comments: { id: number; body: string }[] = [];
+  events: IssueEvent[] = [];
   checkRuns: { id: number; name: string; conclusion: string; head_sha: string }[] = [];
   checkOutputs: CheckOutput[] = [];
   requests: string[] = [];
@@ -73,6 +75,17 @@ export class FakeGitHub {
     if (route === `GET /pulls/${PR_NUMBER}/files`) {
       const items = page(this.files, url).map((file) => ({ ...recorded.files[0], ...file, changes: file.additions + file.deletions }));
       return jsonResponse(200, items);
+    }
+    if (route === `GET /issues/${PR_NUMBER}/events`) {
+      return jsonResponse(
+        200,
+        page(this.events, url).map((event) => ({
+          ...recorded.issueEvent,
+          label: undefined,
+          ...event,
+          actor: event.actor && { ...recorded.issueEvent.actor, ...event.actor },
+        })),
+      );
     }
     if (route === `GET /issues/${PR_NUMBER}/comments`) {
       return jsonResponse(
@@ -152,6 +165,7 @@ export class FakeGitHub {
       "file-threshold": "50",
       exclude: "",
       "bypass-label": "elefante",
+      "bypass-by": "anyone",
       token: "fake-token",
       ...options.inputs,
     };

@@ -1,5 +1,6 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import {
+  type BypassBy,
   CHECK_PREFIX,
   commentBody,
   countFiles,
@@ -9,6 +10,7 @@ import {
   MARKER,
   MAX_LISTED_FILES,
   type PrFile,
+  parseBypassBy,
   parseFileThreshold,
   parseThresholds,
   plural,
@@ -21,6 +23,7 @@ type PullRequest = {
   additions: number;
   deletions: number;
   labels: { name: string }[];
+  user: { id?: unknown } | null;
   head: { sha: string };
 };
 
@@ -99,7 +102,7 @@ async function deleteComment(id: number) {
   }
 }
 
-async function updateComment(pr: PullRequest, decision: Decision, capped: boolean) {
+async function updateComment(pr: PullRequest, decision: Decision, capped: boolean, bypassBy: BypassBy) {
   const existing = await findFirst(pages<{ id: number; body: string }>(`/issues/${pr.number}/comments`), (comment) => comment.body.startsWith(MARKER));
   if (decision.level === "none") {
     if (existing) await deleteComment(existing.id);
@@ -107,23 +110,26 @@ async function updateComment(pr: PullRequest, decision: Decision, capped: boolea
   }
   const body = commentBody(decision, {
     bypassLabel: input("bypass-label"),
+    bypassBy,
     cappedFiles: capped ? pr.changed_files : null,
   });
   if (existing) await api("PATCH", `/issues/comments/${existing.id}`, { body });
   else await api("POST", `/issues/${pr.number}/comments`, { body });
 }
 
-async function updateCheckRun(pr: PullRequest, decision: Decision) {
+async function updateCheckRun(pr: PullRequest, decision: Decision, bypassBy: BypassBy) {
   // Without filter=all a re-run misses the check runs of earlier attempts, and GitHub restores one, red if it was red, when the re-run ends.
   const listed = await Array.fromAsync(pages<{ id: number; name: string }>(`/commits/${pr.head.sha}/check-runs`, (page) => page.check_runs, "&filter=all"));
   const existing = listed.filter((run) => run.name.startsWith(CHECK_PREFIX));
+  const whoAdds =
+    decision.failsJob && bypassBy === "others" ? ` The label \`${input("bypass-label")}\` counts only when someone other than the PR author adds it.` : "";
   const fields = {
     name: decision.checkName,
     status: "completed",
     conclusion: decision.conclusion,
     output: {
       title: size(decision),
-      summary: `Threshold reached: ${decision.threshold ?? "none"}.${decision.filesOver ? ` File threshold reached: ${decision.filesOver.threshold}.` : ""}`,
+      summary: `Threshold reached: ${decision.threshold ?? "none"}.${decision.filesOver ? ` File threshold reached: ${decision.filesOver.threshold}.` : ""}${whoAdds}`,
     },
   };
   for (const run of existing) await api("PATCH", `/check-runs/${run.id}`, fields);
@@ -144,6 +150,25 @@ async function warnOnWriteFailure(what: string, permission: string, changed: str
   }
 }
 
+type IssueEvent = { event: string; actor: { id?: unknown } | null; label?: { name: string } };
+
+async function addedByOthers(pr: PullRequest, label: string): Promise<boolean> {
+  try {
+    const events = await Array.fromAsync(pages<IssueEvent>(`/issues/${pr.number}/events`));
+    const latest = events.findLast((event) => event.event === "labeled" && event.label?.name === label);
+    const adder = latest?.actor?.id;
+    const author = pr.user?.id;
+    return Number.isSafeInteger(adder) && Number.isSafeInteger(author) && adder !== author;
+  } catch (error) {
+    if (!(error instanceof ApiError)) throw error;
+    const reason = error.status === 403 ? "the token got a 403. Add `issues: read` to the job's permissions." : `${error.message}.`;
+    const problem = `bite-the-diff could not read who added the label \`${label}\`: ${reason} The label does not count.`;
+    console.log(`::warning::${problem}`);
+    report(problem);
+    return false;
+  }
+}
+
 async function readPull(number: number) {
   const pr = await api<PullRequest>("GET", `/pulls/${number}`);
   const capped = pr.changed_files > MAX_LISTED_FILES;
@@ -156,6 +181,7 @@ async function run() {
 
   const thresholds = parseThresholds(input("thresholds"));
   const fileThreshold = parseFileThreshold(input("file-threshold"));
+  const bypassBy = parseBypassBy(input("bypass-by"));
   const exclude = input("exclude")
     .split("\n")
     .map((glob) => glob.trim())
@@ -173,21 +199,15 @@ async function run() {
   const { pr, capped, listed } = pull;
   const lines = listed ? countLines(listed, exclude) : pr.additions + pr.deletions;
   const files = listed ? countFiles(listed, exclude) : pr.changed_files;
-  const decision = withFileThreshold(
-    decide(
-      lines,
-      thresholds,
-      pr.labels.some((label) => label.name === input("bypass-label")),
-    ),
-    files,
-    fileThreshold,
-  );
+  const labeled = pr.labels.some((label) => label.name === input("bypass-label"));
+  const bypass = labeled && (bypassBy === "anyone" || (await addedByOthers(pr, input("bypass-label"))));
+  const decision = withFileThreshold(decide(lines, thresholds, bypass), files, fileThreshold);
 
   appendFileSync(process.env.GITHUB_OUTPUT!, `lines=${lines}\nlevel=${decision.level}\nfiles=${files}\n`);
   report(`bite-the-diff: ${size(decision)}, level ${decision.level}.`);
 
-  await warnOnWriteFailure("comment", "pull-requests: write", size(decision), () => updateComment(pr, decision, capped));
-  await warnOnWriteFailure("check run", "checks: write", size(decision), () => updateCheckRun(pr, decision));
+  await warnOnWriteFailure("comment", "pull-requests: write", size(decision), () => updateComment(pr, decision, capped, bypassBy));
+  await warnOnWriteFailure("check run", "checks: write", size(decision), () => updateCheckRun(pr, decision, bypassBy));
 
   if (decision.failsJob) {
     console.log(`::error::This PR changes ${plural(lines, "line")}, past the failing threshold of ${decision.threshold}.`);
